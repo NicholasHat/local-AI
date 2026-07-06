@@ -2,3 +2,12 @@
 .claude:settings.json
 .claudeignore
 .env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+chroma/
+uploads/
