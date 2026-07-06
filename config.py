@@ -35,3 +35,8 @@ def get_host() -> str:
 def get_chroma_path() -> Path:
     """On-disk location for the ChromaDB store (gitignored)."""
     return Path(os.getenv("CHROMA_PATH", "chroma"))
+
+
+def get_upload_dir() -> Path:
+    """Directory where files uploaded via the UI are saved (gitignored)."""
+    return Path(os.getenv("UPLOAD_DIR", "uploads"))

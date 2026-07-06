@@ -4,12 +4,19 @@ _execute_tool()."""
 import chromadb
 
 import agent
+import config
 import ollama_client
 import vectorstore
 
 
 def test_dispatch_read_pdf(text_pdf):
     assert agent._execute_tool("read_pdf", {"path": str(text_pdf)}) == "Hello RAG world"
+
+
+def test_dispatch_read_uploaded_document(text_pdf, monkeypatch):
+    monkeypatch.setattr(config, "get_upload_dir", lambda: text_pdf.parent)
+    out = agent._execute_tool("read_uploaded_document", {"filename": text_pdf.name})
+    assert out == "Hello RAG world"
 
 
 def test_dispatch_list_pdf_fields(form_pdf):

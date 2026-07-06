@@ -8,6 +8,16 @@ def test_system_prompt_seeds_first_message():
     assert conv.messages[0] == {"role": "system", "content": "you are helpful"}
 
 
+def test_add_system_note_appends_system_message():
+    conv = Conversation()
+    conv.add_user("hi")
+    conv.add_system_note("user uploaded resume.pdf")
+    assert conv.messages[1] == {
+        "role": "system",
+        "content": "user uploaded resume.pdf",
+    }
+
+
 def test_add_user_and_tool_result_shapes():
     conv = Conversation()
     conv.add_user("hi")

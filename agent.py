@@ -46,8 +46,34 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "read_uploaded_document",
+            "description": (
+                "Return the FULL text of a document the user uploaded through "
+                "the app sidebar. Use this for whole-document tasks such as "
+                "summarizing or analyzing an entire resume. The argument is the "
+                "filename shown in the sidebar, NOT a filesystem path. Never ask "
+                "the user for a path to a document they uploaded here."
+            ),
+            "parameters": _obj(
+                {
+                    "filename": {
+                        "type": "string",
+                        "description": "The uploaded file's name (from the sidebar).",
+                    }
+                },
+                ["filename"],
+            ),
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "read_pdf",
-            "description": "Extract and return the text content of a PDF file.",
+            "description": (
+                "Extract the text of a PDF located at a filesystem path the user "
+                "explicitly provided. Do NOT use this for files uploaded in the "
+                "sidebar — use read_uploaded_document instead."
+            ),
             "parameters": _obj(
                 {"path": {"type": "string", "description": "Path to the PDF."}},
                 ["path"],
@@ -94,8 +120,10 @@ TOOL_SCHEMAS = [
         "function": {
             "name": "search_documents",
             "description": (
-                "Semantic search over ingested documents. Use to answer "
-                "questions about the user's uploaded files/notes."
+                "Semantic search over uploaded documents; returns the most "
+                "relevant snippets. Best for answering a specific question across "
+                "documents. To read/analyze an entire uploaded document, use "
+                "read_uploaded_document instead."
             ),
             "parameters": _obj(
                 {"query": {"type": "string", "description": "What to look for."}},
@@ -110,6 +138,8 @@ def _execute_tool(name: str, args: dict) -> str:
     """The single tool dispatch point. Returns a string result for the model."""
     if name == "get_time":
         return _get_time()
+    if name == "read_uploaded_document":
+        return pdf_reader.read_uploaded_document(args["filename"])
     if name == "read_pdf":
         return pdf_reader.extract_text(args["path"])
     if name == "list_pdf_fields":

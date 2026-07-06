@@ -9,8 +9,6 @@ Design notes:
   @st.cache_resource so it runs once, not on every rerun.
 """
 
-from pathlib import Path
-
 import streamlit as st
 
 import agent
@@ -21,12 +19,15 @@ from memory import Conversation
 from vectorstore import get_collection
 
 SYSTEM_PROMPT = (
-    "You are a helpful local assistant. You can read and fill PDF forms and "
-    "search the user's uploaded documents. Prefer using your tools over "
-    "guessing. When answering from documents, cite the source."
+    "You are a helpful local assistant with tools for PDFs and documents. "
+    "Documents the user uploads in the sidebar are already available to you: "
+    "read a whole uploaded document with read_uploaded_document(filename), and "
+    "answer specific questions across uploaded documents with search_documents. "
+    "Use read_pdf / list_pdf_fields / fill_pdf only for files at a filesystem "
+    "path the user explicitly gives you. Never ask the user for a file path to "
+    "a document they uploaded in the sidebar. Prefer tools over guessing, and "
+    "cite sources when answering from documents."
 )
-
-UPLOAD_DIR = Path("uploads")
 
 
 @st.cache_resource
@@ -50,21 +51,29 @@ def _current_model() -> str | None:
         return None
 
 
-def _handle_uploads(files) -> None:
-    """Ingest newly uploaded PDFs once each (dedup by name+size across reruns)."""
+def _handle_uploads(files, conv: Conversation) -> None:
+    """Ingest newly uploaded PDFs once each (dedup by name+size across reruns),
+    and tell the model each document now exists so it can actually use it."""
     ingested = st.session_state.setdefault("ingested_files", set())
-    UPLOAD_DIR.mkdir(exist_ok=True)
+    upload_dir = config.get_upload_dir()
+    upload_dir.mkdir(exist_ok=True)
 
     for f in files:
         key = (f.name, f.size)
         if key in ingested:
             continue
-        dest = UPLOAD_DIR / f.name
+        dest = upload_dir / f.name
         dest.write_bytes(f.getbuffer())
         with st.spinner(f"Indexing {f.name}…"):
             try:
                 n = ingest.ingest_pdf(str(dest))
                 st.success(f"Indexed {f.name} ({n} chunk{'s' if n != 1 else ''}).")
+                conv.add_system_note(
+                    f"The user uploaded a document named '{f.name}'. Read its full "
+                    f"text with read_uploaded_document(filename='{f.name}'), or "
+                    "answer specific questions about it with search_documents. Do "
+                    "not ask the user for a file path."
+                )
             except Exception as exc:  # noqa: BLE001 - surface any ingest failure
                 st.error(f"Failed to index {f.name}: {exc}")
         ingested.add(key)
@@ -108,7 +117,7 @@ def main() -> None:
             "Upload PDFs to chat with", type=["pdf"], accept_multiple_files=True
         )
         if uploads:
-            _handle_uploads(uploads)
+            _handle_uploads(uploads, conv)
 
         st.divider()
         if st.button("Clear conversation"):

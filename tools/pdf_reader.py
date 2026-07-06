@@ -10,6 +10,8 @@ from pathlib import Path
 import pdfplumber
 from pypdf import PdfReader
 
+import config
+
 
 def read_text(path: str) -> str:
     """Raw extracted text (empty string if none). Shared by the tool below and
@@ -26,6 +28,27 @@ def extract_text(path: str) -> str:
         return f"Error: file not found: {p}"
 
     text = read_text(p)
+    if not text:
+        return "(No extractable text — the PDF is likely scanned images; OCR needed.)"
+    return text
+
+
+def read_uploaded_document(filename: str) -> str:
+    """Tool: return the FULL text of a document the user uploaded via the app.
+
+    Use this for whole-document tasks (e.g. "analyze my resume"). `filename` is
+    the name shown in the sidebar, NOT a filesystem path — we resolve it inside
+    the upload directory and reduce it to a basename to block path traversal.
+    """
+    safe = Path(filename).name
+    path = config.get_upload_dir() / safe
+    if not path.exists():
+        return (
+            f"Error: no uploaded document named '{safe}'. Use the exact filename "
+            "shown in the sidebar's Documents list."
+        )
+
+    text = read_text(path)
     if not text:
         return "(No extractable text — the PDF is likely scanned images; OCR needed.)"
     return text

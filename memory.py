@@ -28,6 +28,11 @@ class Conversation:
     def add_user(self, content: str) -> None:
         self._messages.append({"role": "user", "content": content})
 
+    def add_system_note(self, content: str) -> None:
+        """Append a system-role note mid-conversation, e.g. to tell the model a
+        document was uploaded and how to reach it."""
+        self._messages.append({"role": "system", "content": content})
+
     def add_assistant(self, message: dict) -> None:
         """Store an assistant message as returned by ollama_client.chat().
 

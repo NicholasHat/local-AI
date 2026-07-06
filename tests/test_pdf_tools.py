@@ -4,11 +4,29 @@ import json
 
 from pypdf import PdfReader
 
+import config
 from tools import pdf_filler, pdf_reader
 
 
 def test_extract_text(text_pdf):
     assert pdf_reader.extract_text(str(text_pdf)) == "Hello RAG world"
+
+
+def test_read_uploaded_document(text_pdf, monkeypatch):
+    monkeypatch.setattr(config, "get_upload_dir", lambda: text_pdf.parent)
+    assert pdf_reader.read_uploaded_document(text_pdf.name) == "Hello RAG world"
+
+
+def test_read_uploaded_document_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "get_upload_dir", lambda: tmp_path)
+    assert "no uploaded document" in pdf_reader.read_uploaded_document("nope.pdf")
+
+
+def test_read_uploaded_document_blocks_path_traversal(text_pdf, monkeypatch):
+    monkeypatch.setattr(config, "get_upload_dir", lambda: text_pdf.parent)
+    # A traversal-y name is reduced to its basename and still resolves in-dir.
+    out = pdf_reader.read_uploaded_document(f"../../{text_pdf.name}")
+    assert out == "Hello RAG world"
 
 
 def test_extract_text_missing_file(tmp_path):
