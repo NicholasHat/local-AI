@@ -5,18 +5,18 @@ append results -> repeat -> until no tool_calls -> return final answer.
 Bounded by MAX_ITERATIONS to prevent runaway loops.
 
 Tool dispatch lives ONLY here. Add a new tool by:
-  1. writing a function (real tools go in tools/, Phase 4+),
+  1. writing a function (real tools go in tools/),
   2. advertising its schema in TOOL_SCHEMAS,
   3. adding a case in _execute_tool().
 
-`get_time` below is the Phase 3 skeleton tool that proves the cycle; Phase 4
-replaces/augments it with the real pdf/doc tools.
+`get_time` is the original skeleton tool; the pdf/doc tools are the real ones.
 """
 
 from datetime import UTC, datetime
 
 import ollama_client
 from memory import Conversation
+from tools import doc_search, pdf_filler, pdf_reader
 
 MAX_ITERATIONS = 8
 
@@ -29,6 +29,10 @@ def _get_time() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _obj(properties: dict, required: list[str]) -> dict:
+    return {"type": "object", "properties": properties, "required": required}
+
+
 # Schemas advertised to the model (docs/ollama-tool-calling.md request format).
 TOOL_SCHEMAS = [
     {
@@ -36,7 +40,67 @@ TOOL_SCHEMAS = [
         "function": {
             "name": "get_time",
             "description": "Get the current UTC time as an ISO 8601 string.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
+            "parameters": _obj({}, []),
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_pdf",
+            "description": "Extract and return the text content of a PDF file.",
+            "parameters": _obj(
+                {"path": {"type": "string", "description": "Path to the PDF."}},
+                ["path"],
+            ),
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_pdf_fields",
+            "description": (
+                "List the fillable AcroForm field names and current values in a "
+                "PDF. Call this before filling to learn the field names."
+            ),
+            "parameters": _obj(
+                {"path": {"type": "string", "description": "Path to the PDF."}},
+                ["path"],
+            ),
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fill_pdf",
+            "description": (
+                "Fill AcroForm fields of a PDF and save a copy. `values` maps "
+                "field name -> value. Fails clearly if the PDF has no form fields."
+            ),
+            "parameters": _obj(
+                {
+                    "input_path": {"type": "string"},
+                    "output_path": {"type": "string"},
+                    "values": {
+                        "type": "object",
+                        "description": "Field name -> value to write.",
+                    },
+                },
+                ["input_path", "output_path", "values"],
+            ),
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_documents",
+            "description": (
+                "Semantic search over ingested documents. Use to answer "
+                "questions about the user's uploaded files/notes."
+            ),
+            "parameters": _obj(
+                {"query": {"type": "string", "description": "What to look for."}},
+                ["query"],
+            ),
         },
     },
 ]
@@ -46,6 +110,14 @@ def _execute_tool(name: str, args: dict) -> str:
     """The single tool dispatch point. Returns a string result for the model."""
     if name == "get_time":
         return _get_time()
+    if name == "read_pdf":
+        return pdf_reader.extract_text(args["path"])
+    if name == "list_pdf_fields":
+        return pdf_reader.list_fields(args["path"])
+    if name == "fill_pdf":
+        return pdf_filler.fill(args["input_path"], args["output_path"], args["values"])
+    if name == "search_documents":
+        return doc_search.search(args["query"], args.get("n_results", 4))
     raise ValueError(f"Unknown tool: {name!r}")
 
 

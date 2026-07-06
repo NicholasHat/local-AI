@@ -5,6 +5,7 @@ module never crashes when OLLAMA_MODEL is unset — tests import freely.
 """
 
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -29,3 +30,8 @@ def get_embed_model() -> str:
 def get_host() -> str:
     """Ollama API base URL."""
     return os.getenv("OLLAMA_HOST", "http://localhost:11434")
+
+
+def get_chroma_path() -> Path:
+    """On-disk location for the ChromaDB store (gitignored)."""
+    return Path(os.getenv("CHROMA_PATH", "chroma"))
