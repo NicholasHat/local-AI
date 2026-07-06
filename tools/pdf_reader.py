@@ -11,16 +11,21 @@ import pdfplumber
 from pypdf import PdfReader
 
 
+def read_text(path: str) -> str:
+    """Raw extracted text (empty string if none). Shared by the tool below and
+    by ingestion (ingest.py) — neither should sniff the tool's prose strings."""
+    with pdfplumber.open(str(path)) as pdf:
+        pages = [page.extract_text() or "" for page in pdf.pages]
+    return "\n\n".join(pages).strip()
+
+
 def extract_text(path: str) -> str:
-    """Return the extracted text of a PDF, or a note if there is none."""
+    """Tool: return the extracted text of a PDF, or a note if there is none."""
     p = Path(path)
     if not p.exists():
         return f"Error: file not found: {p}"
 
-    with pdfplumber.open(str(p)) as pdf:
-        pages = [page.extract_text() or "" for page in pdf.pages]
-    text = "\n\n".join(pages).strip()
-
+    text = read_text(p)
     if not text:
         return "(No extractable text — the PDF is likely scanned images; OCR needed.)"
     return text
