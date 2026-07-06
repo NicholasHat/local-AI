@@ -1,0 +1,4 @@
+.claude/
+.claude:settings.json
+.claudeignore
+.env
