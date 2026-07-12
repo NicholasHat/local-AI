@@ -7,4 +7,7 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v"
+addopts = "-v -m \"not e2e\""
+markers = [
+    "e2e: requires a live, reachable Ollama instance; run explicitly with `pytest -m e2e`",
+]
