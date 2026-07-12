@@ -1,16 +1,18 @@
-"""HTTP API boundary around the existing assistant backend.
+"""HTTP API boundary around the existing assistant backend, and — once
+web/dist exists — the single process serving both the API and the built
+React app (`uvicorn server:app`, browse to it directly).
 
 Wraps agent/memory/ingest/vectorstore UNCHANGED — they stay the source of
 truth (CLAUDE.md: tool dispatch lives in agent.py, history lives in
 memory.py). This module owns exactly one thing beyond routing: the single
-server-side Conversation, mirroring what ui.py did with st.session_state —
-one active conversation, no per-session state duplication.
+server-side Conversation — one active conversation, no per-session state.
 """
 
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import agent
@@ -273,3 +275,13 @@ def delete_skill_endpoint(name: str) -> dict:
     except skills.SkillError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"status": "ok"}
+
+
+# Serve the built React app, if present. Must be mounted LAST — Starlette
+# matches routes in registration order, and a "/" mount would otherwise
+# shadow every /api/* route above it. Absent until `cd web && npm run
+# build`; the API still works standalone against the Vite dev server in the
+# meantime (see vite.config.ts's dev proxy).
+_WEB_DIST = Path(__file__).parent / "web" / "dist"
+if _WEB_DIST.exists():
+    app.mount("/", StaticFiles(directory=_WEB_DIST, html=True), name="web")

@@ -4,6 +4,12 @@ A local, private assistant built on Ollama with a tool-calling agent loop, PDF
 read/fill tools, and RAG over local documents. No cloud APIs. See `CLAUDE.md`
 for the pinned stack and hard rules — this plan sequences the build.
 
+**Status (2026-07-12): Phases 1–12 all complete.** The app is FastAPI +
+React (`web/`), with model selection and a file-based skills system; the
+Streamlit UI (Phase 6) has been fully cut over and removed (Phase 12). See
+each phase's "Done when" line for what was verified. Next work is whatever
+comes after the "Later enhancements" list below, or a fresh ask.
+
 ## Guiding principle
 
 Build a **walking skeleton first**, then fan out. The tool-calling loop is the

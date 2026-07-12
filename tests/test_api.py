@@ -1,6 +1,8 @@
 """Contract tests for the FastAPI layer — TestClient + mocked ollama_client,
 the same seam test_agent.py uses. No live model needed."""
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -302,3 +304,19 @@ def test_created_skill_is_immediately_usable_via_chat(
     transcript = client.get("/api/conversation").json()
     tool_msg = next(m for m in transcript if m["role"] == "tool")
     assert tool_msg["content"] == "Say hello to Ada."
+
+
+@pytest.mark.skipif(
+    not (Path(__file__).parent.parent / "web" / "dist").exists(),
+    reason="web/dist not built (run `cd web && npm run build`)",
+)
+def test_static_mount_serves_built_frontend_without_shadowing_api(client):
+    """The web/dist static mount must be registered LAST — otherwise a `/`
+    mount would shadow every /api/* route (CLAUDE.md gotcha)."""
+    root = client.get("/")
+    assert root.status_code == 200
+    assert "text/html" in root.headers["content-type"]
+
+    api = client.get("/api/health")
+    assert api.status_code == 200
+    assert set(api.json()) == {"healthy", "model"}
