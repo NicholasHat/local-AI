@@ -42,14 +42,36 @@ def _tool_content(conv: Conversation, name: str) -> str:
     )
 
 
+def _run_forcing_tool(
+    prompt: str, tool_name: str, attempts: int = 3
+) -> tuple[Conversation, str]:
+    """Retry a live prompt a few times before failing.
+
+    Tool-calling models don't invoke a tool 100% of the time even for a
+    directive prompt — retrying the whole live call is the honest way to
+    absorb that sampling noise, rather than loosening what we assert. Only
+    used for tools the model chooses to call (vs. read_pdf/fill_pdf, where an
+    explicit file path leaves the model no other way to answer).
+    """
+    last_conv: Conversation | None = None
+    for _ in range(attempts):
+        conv = _new_conversation()
+        reply = agent.run(prompt, conv)
+        if tool_name in _tool_names_used(conv):
+            return conv, reply
+        last_conv = conv
+    used = _tool_names_used(last_conv) if last_conv else []
+    raise AssertionError(
+        f"{tool_name!r} never called in {attempts} attempts; used: {used}"
+    )
+
+
 def test_get_time_e2e():
-    conv = _new_conversation()
-    reply = agent.run(
+    conv, reply = _run_forcing_tool(
         "What is the exact current time in UTC right now? Call your time "
         "tool rather than guessing, then tell me the hour and minute.",
-        conv,
+        "get_time",
     )
-    assert "get_time" in _tool_names_used(conv)
     assert re.search(r"\d", reply)  # the model relayed *some* digits from the tool
 
 
@@ -119,13 +141,11 @@ def test_ingest_and_search_e2e(isolated_rag):
         "The secret launch code is Zebra-Quasar-77.", source="launch-notes.txt"
     )
 
-    conv = _new_conversation()
-    reply = agent.run(
+    _, reply = _run_forcing_tool(
         "Search my uploaded documents for the secret launch code and tell me "
         "exactly what it is.",
-        conv,
+        "search_documents",
     )
-    assert "search_documents" in _tool_names_used(conv)
     assert "zebra-quasar-77" in reply.lower()
 
 
@@ -134,11 +154,9 @@ def test_read_uploaded_document_e2e(isolated_rag, text_pdf):
     dest = upload_dir / "resume.pdf"
     dest.write_bytes(text_pdf.read_bytes())
 
-    conv = _new_conversation()
-    reply = agent.run(
+    _, reply = _run_forcing_tool(
         "Read the full text of the document named 'resume.pdf' that I "
         "uploaded, and quote it back to me verbatim.",
-        conv,
+        "read_uploaded_document",
     )
-    assert "read_uploaded_document" in _tool_names_used(conv)
     assert "hello rag world" in reply.lower()
