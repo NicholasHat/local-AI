@@ -13,7 +13,15 @@ import vectorstore
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setattr(server, "_conversation", None)
+    monkeypatch.setattr(server, "_selected_model", None)
     return TestClient(server.app)
+
+
+_FAKE_MODELS = [
+    {"name": "qwen2.5:latest", "size": 100, "capabilities": ["completion", "tools"]},
+    {"name": "llama3.1:latest", "size": 200, "capabilities": ["completion", "tools"]},
+    {"name": "nomic-embed-text:latest", "size": 50, "capabilities": ["embedding"]},
+]
 
 
 def _mock_chat_reply(content: str):
@@ -98,3 +106,60 @@ def test_upload_ingests_and_lists_document(client, tmp_path, monkeypatch, text_p
 def test_upload_rejects_non_file_body(client):
     resp = client.post("/api/upload", data={"file": "not-a-file"})
     assert resp.status_code == 422
+
+
+def test_list_models_reports_tool_capability(client, monkeypatch):
+    monkeypatch.setattr(ollama_client, "list_models", lambda: _FAKE_MODELS)
+    resp = client.get("/api/models")
+    assert resp.status_code == 200
+    body = resp.json()
+    by_name = {m["name"]: m for m in body["models"]}
+    assert by_name["qwen2.5:latest"]["tool_capable"] is True
+    assert by_name["nomic-embed-text:latest"]["tool_capable"] is False
+
+
+def test_list_models_resolves_untagged_default_to_tagged_name(client, monkeypatch):
+    """config.get_model() ('qwen2.5') is untagged; list_models() reports
+    'qwen2.5:latest' — `current` must match one of the listed option names,
+    or a frontend <select> bound to it silently falls back to the wrong
+    option instead of reflecting the real default."""
+    monkeypatch.setattr(ollama_client, "list_models", lambda: _FAKE_MODELS)
+    monkeypatch.setattr(config, "get_model", lambda: "qwen2.5")
+
+    resp = client.get("/api/models")
+    current = resp.json()["current"]
+    assert current == "qwen2.5:latest"
+    assert current in {m["name"] for m in resp.json()["models"]}
+
+
+def test_set_model_switches_current_and_used_in_chat(client, monkeypatch):
+    monkeypatch.setattr(ollama_client, "list_models", lambda: _FAKE_MODELS)
+    monkeypatch.setattr(ollama_client, "health_check", lambda: True)
+
+    resp = client.post("/api/settings/model", json={"model": "llama3.1:latest"})
+    assert resp.status_code == 200
+    assert resp.json()["current"] == "llama3.1:latest"
+
+    assert client.get("/api/health").json()["model"] == "llama3.1:latest"
+
+    captured = {}
+
+    def fake_chat(messages, tools=None, model=None):
+        captured["model"] = model
+        return {"role": "assistant", "content": "ack", "tool_calls": None}
+
+    monkeypatch.setattr(ollama_client, "chat", fake_chat)
+    client.post("/api/chat", json={"message": "hi"})
+    assert captured["model"] == "llama3.1:latest"
+
+
+def test_set_model_rejects_unknown_model(client, monkeypatch):
+    monkeypatch.setattr(ollama_client, "list_models", lambda: _FAKE_MODELS)
+    resp = client.post("/api/settings/model", json={"model": "does-not-exist"})
+    assert resp.status_code == 404
+
+
+def test_set_model_rejects_non_tool_capable_model(client, monkeypatch):
+    monkeypatch.setattr(ollama_client, "list_models", lambda: _FAKE_MODELS)
+    resp = client.post("/api/settings/model", json={"model": "nomic-embed-text:latest"})
+    assert resp.status_code == 400

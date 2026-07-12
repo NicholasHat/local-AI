@@ -81,3 +81,51 @@ def test_health_check_false_on_error(monkeypatch):
         ollama_client, "_get_client", lambda: SimpleNamespace(list=boom)
     )
     assert ollama_client.health_check() is False
+
+
+class _FakeListClient:
+    """The SDK's list() omits `capabilities` (a newer server field) — only a
+    per-model show() call surfaces it, so the fake mirrors that split."""
+
+    def __init__(self, models: list[dict]):
+        self._models = models
+
+    def list(self):
+        return SimpleNamespace(
+            models=[
+                SimpleNamespace(model=m["name"], size=m["size"]) for m in self._models
+            ]
+        )
+
+    def show(self, name):
+        for m in self._models:
+            if m["name"] == name:
+                return SimpleNamespace(capabilities=m["capabilities"])
+        raise ValueError(f"no such model: {name}")
+
+
+def test_list_models_merges_size_and_capabilities(monkeypatch):
+    fake = _FakeListClient(
+        [
+            {
+                "name": "qwen2.5:latest",
+                "size": 100,
+                "capabilities": ["completion", "tools"],
+            },
+            {
+                "name": "nomic-embed-text:latest",
+                "size": 50,
+                "capabilities": ["embedding"],
+            },
+        ]
+    )
+    monkeypatch.setattr(ollama_client, "_get_client", lambda: fake)
+
+    assert ollama_client.list_models() == [
+        {
+            "name": "qwen2.5:latest",
+            "size": 100,
+            "capabilities": ["completion", "tools"],
+        },
+        {"name": "nomic-embed-text:latest", "size": 50, "capabilities": ["embedding"]},
+    ]

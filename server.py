@@ -29,6 +29,7 @@ app.add_middleware(
 )
 
 _conversation: Conversation | None = None
+_selected_model: str | None = None  # None = use config.get_model()'s default
 
 
 def _get_conversation() -> Conversation:
@@ -36,6 +37,15 @@ def _get_conversation() -> Conversation:
     if _conversation is None:
         _conversation = Conversation(system_prompt=agent.SYSTEM_PROMPT)
     return _conversation
+
+
+def _active_model() -> str | None:
+    if _selected_model:
+        return _selected_model
+    try:
+        return config.get_model()
+    except RuntimeError:
+        return None
 
 
 class HealthResponse(BaseModel):
@@ -61,13 +71,70 @@ class DocumentInfo(BaseModel):
     size_bytes: int
 
 
+class ModelInfo(BaseModel):
+    name: str
+    size: int
+    tool_capable: bool
+
+
+class ModelsResponse(BaseModel):
+    models: list[ModelInfo]
+    current: str | None
+
+
+class SetModelRequest(BaseModel):
+    model: str
+
+
+def _model_infos() -> list[ModelInfo]:
+    return [
+        ModelInfo(
+            name=m["name"], size=m["size"], tool_capable="tools" in m["capabilities"]
+        )
+        for m in ollama_client.list_models()
+    ]
+
+
 @app.get("/api/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    try:
-        model = config.get_model()
-    except RuntimeError:
-        model = None
-    return HealthResponse(healthy=ollama_client.health_check(), model=model)
+    return HealthResponse(healthy=ollama_client.health_check(), model=_active_model())
+
+
+def _resolved_active_model(infos: list[ModelInfo]) -> str | None:
+    """Resolve the active model to the exact tagged name the installed-models
+    list uses, so a picker's selected value always matches a real option.
+
+    Ollama accepts an untagged name (defaulting to :latest) for chat calls,
+    but always reports installed models with an explicit tag — so
+    config.get_model()'s raw value ("qwen2.5") won't match list_models()'
+    tagged name ("qwen2.5:latest") unless resolved here.
+    """
+    model = _active_model()
+    if model is None or any(m.name == model for m in infos):
+        return model
+    return next((m.name for m in infos if m.name.startswith(f"{model}:")), model)
+
+
+@app.get("/api/models", response_model=ModelsResponse)
+def list_models() -> ModelsResponse:
+    infos = _model_infos()
+    return ModelsResponse(models=infos, current=_resolved_active_model(infos))
+
+
+@app.post("/api/settings/model", response_model=ModelsResponse)
+def set_model(request: SetModelRequest) -> ModelsResponse:
+    global _selected_model
+    infos = _model_infos()
+    match = next((m for m in infos if m.name == request.model), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail=f"Unknown model: {request.model!r}")
+    if not match.tool_capable:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{request.model!r} doesn't support tool calling.",
+        )
+    _selected_model = request.model
+    return ModelsResponse(models=infos, current=_selected_model)
 
 
 @app.get("/api/conversation")
@@ -84,14 +151,14 @@ def reset_conversation() -> dict:
 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
-    try:
-        config.get_model()
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if _active_model() is None:
+        raise HTTPException(
+            status_code=503, detail="No model configured. Set OLLAMA_MODEL."
+        )
     if not ollama_client.health_check():
         raise HTTPException(status_code=503, detail="Ollama is not reachable.")
 
-    reply = agent.run(request.message, _get_conversation())
+    reply = agent.run(request.message, _get_conversation(), model=_selected_model)
     return ChatResponse(reply=reply)
 
 

@@ -30,3 +30,14 @@ export type DocumentInfo = {
   filename: string
   size_bytes: number
 }
+
+export type ModelInfo = {
+  name: string
+  size: number
+  tool_capable: boolean
+}
+
+export type ModelsResponse = {
+  models: ModelInfo[]
+  current: string | null
+}

@@ -3,7 +3,14 @@ import { api } from './api'
 import { Composer } from './components/Composer'
 import { Sidebar } from './components/Sidebar'
 import { Transcript } from './components/Transcript'
-import type { ConversationMessage, DocumentInfo, HealthResponse } from './types'
+import type {
+  ConversationMessage,
+  DocumentInfo,
+  HealthResponse,
+  ModelsResponse,
+} from './types'
+
+const EMPTY_MODELS: ModelsResponse = { models: [], current: null }
 
 function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -16,10 +23,12 @@ function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [messages, setMessages] = useState<ConversationMessage[]>([])
   const [documents, setDocuments] = useState<DocumentInfo[]>([])
+  const [modelsInfo, setModelsInfo] = useState<ModelsResponse>(EMPTY_MODELS)
 
   const [pendingMessage, setPendingMessage] = useState<string | null>(null)
   const [thinking, setThinking] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [switchingModel, setSwitchingModel] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -32,18 +41,24 @@ function App() {
     async () => setDocuments(await api.documents()),
     [],
   )
+  const refreshModels = useCallback(async () => setModelsInfo(await api.models()), [])
 
   const load = useCallback(async () => {
     setInitializing(true)
     setInitError(null)
     try {
-      await Promise.all([refreshHealth(), refreshConversation(), refreshDocuments()])
+      await Promise.all([
+        refreshHealth(),
+        refreshConversation(),
+        refreshDocuments(),
+        refreshModels(),
+      ])
     } catch (e) {
       setInitError(errorMessage(e))
     } finally {
       setInitializing(false)
     }
-  }, [refreshHealth, refreshConversation, refreshDocuments])
+  }, [refreshHealth, refreshConversation, refreshDocuments, refreshModels])
 
   useEffect(() => {
     load()
@@ -87,6 +102,19 @@ function App() {
     }
   }
 
+  async function handleSelectModel(name: string) {
+    setSwitchingModel(true)
+    setError(null)
+    try {
+      await api.setModel(name)
+      await Promise.all([refreshModels(), refreshHealth()])
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setSwitchingModel(false)
+    }
+  }
+
   if (initializing) {
     return (
       <div className="flex h-screen items-center justify-center text-neutral-400">
@@ -125,6 +153,10 @@ function App() {
         onUpload={handleUpload}
         onReset={handleReset}
         onRecheckHealth={refreshHealth}
+        models={modelsInfo.models}
+        currentModel={modelsInfo.current}
+        switchingModel={switchingModel}
+        onSelectModel={handleSelectModel}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">

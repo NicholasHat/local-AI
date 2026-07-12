@@ -87,3 +87,27 @@ def test_execute_tool_unknown_raises():
 
     with pytest.raises(ValueError):
         agent._execute_tool("does_not_exist", {})
+
+
+def test_run_default_model_is_none(monkeypatch):
+    captured = {}
+
+    def fake_chat(messages, tools=None, model=None):
+        captured["model"] = model
+        return {"role": "assistant", "content": "done", "tool_calls": None}
+
+    monkeypatch.setattr(ollama_client, "chat", fake_chat)
+    agent.run("hi", Conversation())
+    assert captured["model"] is None
+
+
+def test_run_passes_explicit_model_to_chat(monkeypatch):
+    captured = {}
+
+    def fake_chat(messages, tools=None, model=None):
+        captured["model"] = model
+        return {"role": "assistant", "content": "done", "tool_calls": None}
+
+    monkeypatch.setattr(ollama_client, "chat", fake_chat)
+    agent.run("hi", Conversation(), model="llama3.1")
+    assert captured["model"] == "llama3.1"

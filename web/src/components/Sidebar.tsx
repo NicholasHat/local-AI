@@ -1,5 +1,6 @@
 import { useRef } from 'react'
-import type { DocumentInfo, HealthResponse } from '../types'
+import type { DocumentInfo, HealthResponse, ModelInfo } from '../types'
+import { ModelPicker } from './ModelPicker'
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -15,6 +16,10 @@ export function Sidebar({
   onUpload,
   onReset,
   onRecheckHealth,
+  models,
+  currentModel,
+  switchingModel,
+  onSelectModel,
 }: {
   open: boolean
   health: HealthResponse | null
@@ -23,6 +28,10 @@ export function Sidebar({
   onUpload: (file: File) => void
   onReset: () => void
   onRecheckHealth: () => void
+  models: ModelInfo[]
+  currentModel: string | null
+  switchingModel: boolean
+  onSelectModel: (name: string) => void
 }) {
   const fileInput = useRef<HTMLInputElement>(null)
 
@@ -66,6 +75,13 @@ export function Sidebar({
             <span className={statusLabel.tone}>{statusLabel.text}</span>
           </button>
         </div>
+
+        <ModelPicker
+          models={models}
+          current={currentModel}
+          switching={switchingModel}
+          onSelect={onSelectModel}
+        />
 
         <div>
           <h2 className="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">

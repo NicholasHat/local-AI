@@ -7,6 +7,7 @@ import type {
   ConversationMessage,
   DocumentInfo,
   HealthResponse,
+  ModelsResponse,
   UploadResponse,
 } from './types'
 
@@ -47,4 +48,9 @@ export const api = {
   },
 
   documents: () => request<DocumentInfo[]>('/documents'),
+
+  models: () => request<ModelsResponse>('/models'),
+
+  setModel: (model: string) =>
+    request<ModelsResponse>('/settings/model', json({ model })),
 }

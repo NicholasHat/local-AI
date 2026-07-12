@@ -51,6 +51,28 @@ def embed(text: str, model=None) -> list[float]:
     return response.embeddings[0]
 
 
+def list_models() -> list[dict]:
+    """List installed models with name, size, and capabilities (e.g. "tools").
+
+    The SDK's `list()` response doesn't surface `capabilities` — only a
+    per-model `show()` call does (verified against a live server) — so we
+    fetch it once per model. Small N (a handful of local models), and not on
+    the hot path, so the extra round trips are a non-issue.
+    """
+    client = _get_client()
+    models = []
+    for m in client.list().models:
+        info = client.show(m.model)
+        models.append(
+            {
+                "name": m.model,
+                "size": m.size,
+                "capabilities": list(info.capabilities or []),
+            }
+        )
+    return models
+
+
 def health_check() -> bool:
     """Return True if Ollama is reachable. Used by the UI at startup."""
     try:

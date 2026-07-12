@@ -165,15 +165,18 @@ def _execute_tool(name: str, args: dict) -> str:
 # --- Loop ----------------------------------------------------------------
 
 
-def run(user_message: str, conversation: Conversation) -> str:
+def run(user_message: str, conversation: Conversation, model: str | None = None) -> str:
     """Run one user turn through the tool-calling loop; return the reply text.
 
     `conversation` (memory.py) is the source of truth and is mutated in place.
+    `model` overrides the default (config.OLLAMA_MODEL) for this turn only.
     """
     conversation.add_user(user_message)
 
     for _ in range(MAX_ITERATIONS):
-        message = ollama_client.chat(messages=conversation.messages, tools=TOOL_SCHEMAS)
+        message = ollama_client.chat(
+            messages=conversation.messages, tools=TOOL_SCHEMAS, model=model
+        )
         conversation.add_assistant(message)
 
         tool_calls = message.get("tool_calls")
