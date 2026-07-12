@@ -1,6 +1,8 @@
 # Local AI Assistant
 
+## Project
 Local Ollama-based assistant with chat, PDF tools, and RAG. No cloud APIs.
+See `plan.md` for current phase and task status. Read it at the start of every session.
 
 ## Stack
 - Python 3.11+, Streamlit UI
@@ -12,7 +14,8 @@ Local Ollama-based assistant with chat, PDF tools, and RAG. No cloud APIs.
 ## Commands
 ```bash
 streamlit run ui.py
-pytest tests/ -v
+pytest tests/ -v          # fast, mocked, no live model
+pytest -m e2e -v          # live model required; skips cleanly if Ollama is down
 ruff check . && ruff format .
 ```
 
@@ -30,8 +33,20 @@ ruff check . && ruff format .
 - Tool call + result pairs in message history must be kept together — never trim one without the other
 
 ## Workflow
-### 1. Demand Elegance (Balanced)
+
+### 1. Read the plan first
+Before starting any work, read `plan.md`. Mark tasks complete as you go. If a task turns out to need splitting, update the plan before diving in.
+
+### 2. Verify against a real Ollama call before scaling out
+For any new tool or prompt-shape change, run it against the live model once and inspect the raw request/response before wiring it into the full agent loop or writing tests around assumed behavior. Don't code to memory of the API — verify the current shape.
+
+### 3. Demand elegance (balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
 - If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
-- Skip this for simple, obvious fixes - don't over-engineer
+- Skip this for simple, obvious fixes — don't over-engineer
 - Challenge your own work before presenting it
+
+## Choices
+- Don't ever add yourself as co-author
+- Prefer editing existing files over creating new ones
+- Remove debug print statements before marking a task done
