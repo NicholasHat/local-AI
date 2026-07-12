@@ -8,6 +8,8 @@ import type {
   DocumentInfo,
   HealthResponse,
   ModelsResponse,
+  SkillInfo,
+  SkillWriteRequest,
 } from './types'
 
 const EMPTY_MODELS: ModelsResponse = { models: [], current: null }
@@ -24,11 +26,13 @@ function App() {
   const [messages, setMessages] = useState<ConversationMessage[]>([])
   const [documents, setDocuments] = useState<DocumentInfo[]>([])
   const [modelsInfo, setModelsInfo] = useState<ModelsResponse>(EMPTY_MODELS)
+  const [skills, setSkills] = useState<SkillInfo[]>([])
 
   const [pendingMessage, setPendingMessage] = useState<string | null>(null)
   const [thinking, setThinking] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [switchingModel, setSwitchingModel] = useState(false)
+  const [skillsBusy, setSkillsBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -42,6 +46,7 @@ function App() {
     [],
   )
   const refreshModels = useCallback(async () => setModelsInfo(await api.models()), [])
+  const refreshSkills = useCallback(async () => setSkills(await api.skills()), [])
 
   const load = useCallback(async () => {
     setInitializing(true)
@@ -52,13 +57,14 @@ function App() {
         refreshConversation(),
         refreshDocuments(),
         refreshModels(),
+        refreshSkills(),
       ])
     } catch (e) {
       setInitError(errorMessage(e))
     } finally {
       setInitializing(false)
     }
-  }, [refreshHealth, refreshConversation, refreshDocuments, refreshModels])
+  }, [refreshHealth, refreshConversation, refreshDocuments, refreshModels, refreshSkills])
 
   useEffect(() => {
     load()
@@ -75,7 +81,7 @@ function App() {
     } finally {
       setPendingMessage(null)
       setThinking(false)
-      await Promise.allSettled([refreshConversation(), refreshHealth()])
+      await Promise.allSettled([refreshConversation(), refreshHealth(), refreshSkills()])
     }
   }
 
@@ -112,6 +118,39 @@ function App() {
       setError(errorMessage(e))
     } finally {
       setSwitchingModel(false)
+    }
+  }
+
+  async function handleCreateSkill(payload: SkillWriteRequest) {
+    setSkillsBusy(true)
+    try {
+      await api.createSkill(payload)
+      await refreshSkills()
+    } finally {
+      setSkillsBusy(false)
+    }
+  }
+
+  async function handleUpdateSkill(name: string, payload: SkillWriteRequest) {
+    setSkillsBusy(true)
+    try {
+      await api.updateSkill(name, payload)
+      await refreshSkills()
+    } finally {
+      setSkillsBusy(false)
+    }
+  }
+
+  async function handleDeleteSkill(name: string) {
+    setSkillsBusy(true)
+    setError(null)
+    try {
+      await api.deleteSkill(name)
+      await refreshSkills()
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setSkillsBusy(false)
     }
   }
 
@@ -157,6 +196,11 @@ function App() {
         currentModel={modelsInfo.current}
         switchingModel={switchingModel}
         onSelectModel={handleSelectModel}
+        skills={skills}
+        skillsBusy={skillsBusy}
+        onCreateSkill={handleCreateSkill}
+        onUpdateSkill={handleUpdateSkill}
+        onDeleteSkill={handleDeleteSkill}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">

@@ -41,3 +41,21 @@ export type ModelsResponse = {
   models: ModelInfo[]
   current: string | null
 }
+
+export type SkillInfo = {
+  name: string
+  description: string
+  kind: 'instruction' | 'code'
+  parameters: Record<string, unknown>
+  required: string[]
+  body: string
+}
+
+export type SkillWriteRequest = {
+  name: string
+  description: string
+  parameters: Record<string, unknown>
+  required: string[]
+  prompt?: string
+  code?: string
+}

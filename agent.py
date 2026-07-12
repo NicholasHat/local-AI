@@ -9,12 +9,17 @@ Tool dispatch lives ONLY here. Add a new tool by:
   2. advertising its schema in TOOL_SCHEMAS,
   3. adding a case in _execute_tool().
 
+The second way to add a tool is a skill (skills.py) — a file on disk under
+skills/<name>/, discovered fresh each turn and dispatched via the one
+`skill__` case below, with no code change here required.
+
 `get_time` is the original skeleton tool; the pdf/doc tools are the real ones.
 """
 
 from datetime import UTC, datetime
 
 import ollama_client
+import skills
 from memory import Conversation
 from tools import doc_search, pdf_filler, pdf_reader
 
@@ -142,6 +147,53 @@ TOOL_SCHEMAS = [
             ),
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_skill",
+            "description": (
+                "Create a new INSTRUCTION skill for yourself: a reusable prompt "
+                "template you will follow whenever this skill is invoked again. "
+                "Use this when the user asks you to build yourself a new "
+                "capability made of instructions (e.g. 'make yourself a skill "
+                "that rewrites text as a formal email'). This can only create "
+                "instruction-based skills — it can never make a skill that runs "
+                "code; that requires a human authoring it directly."
+            ),
+            "parameters": _obj(
+                {
+                    "name": {
+                        "type": "string",
+                        "description": "Slug name: lowercase letters/digits/hyphens.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "What the skill does, for the tool list.",
+                    },
+                    "parameters": {
+                        "type": "object",
+                        "description": (
+                            'JSON-schema "properties" for the skill\'s arguments, '
+                            'e.g. {"text": {"type": "string"}}.'
+                        ),
+                    },
+                    "required": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Which of those argument names are required.",
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "description": (
+                            "The instruction template, with {argument_name} "
+                            "placeholders for each parameter."
+                        ),
+                    },
+                },
+                ["name", "description", "prompt"],
+            ),
+        },
+    },
 ]
 
 
@@ -159,6 +211,16 @@ def _execute_tool(name: str, args: dict) -> str:
         return pdf_filler.fill(args["input_path"], args["output_path"], args["values"])
     if name == "search_documents":
         return doc_search.search(args["query"], args.get("n_results", 4))
+    if name == "create_skill":
+        return skills.create_instruction_skill(
+            name=args["name"],
+            description=args["description"],
+            parameters=args.get("parameters") or {},
+            required=args.get("required") or [],
+            prompt=args["prompt"],
+        )
+    if name.startswith("skill__"):
+        return skills.execute(name, args)
     raise ValueError(f"Unknown tool: {name!r}")
 
 
@@ -172,10 +234,11 @@ def run(user_message: str, conversation: Conversation, model: str | None = None)
     `model` overrides the default (config.OLLAMA_MODEL) for this turn only.
     """
     conversation.add_user(user_message)
+    tools = TOOL_SCHEMAS + skills.tool_schemas()
 
     for _ in range(MAX_ITERATIONS):
         message = ollama_client.chat(
-            messages=conversation.messages, tools=TOOL_SCHEMAS, model=model
+            messages=conversation.messages, tools=tools, model=model
         )
         conversation.add_assistant(message)
 

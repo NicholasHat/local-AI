@@ -1,0 +1,10 @@
+name: summarize-for-email
+description: >-
+  Rewrite a piece of text as a short, formal summary suitable for pasting
+  into a professional email.
+parameters:
+  text:
+    type: string
+    description: The text to summarize.
+required:
+  - text

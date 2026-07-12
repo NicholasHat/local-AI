@@ -6,6 +6,7 @@ import chromadb
 import agent
 import config
 import ollama_client
+import skills
 import vectorstore
 
 
@@ -50,3 +51,22 @@ def test_dispatch_search_documents(monkeypatch):
     monkeypatch.setattr(ollama_client, "embed", lambda text: [1.0, 0.0])
     out = agent._execute_tool("search_documents", {"query": "answer"})
     assert "the answer is 42" in out
+
+
+def test_dispatch_create_skill_then_invoke_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(skills, "SKILLS_DIR", tmp_path / "skills")
+
+    msg = agent._execute_tool(
+        "create_skill",
+        {
+            "name": "greet",
+            "description": "Greets someone",
+            "parameters": {"name": {"type": "string"}},
+            "required": ["name"],
+            "prompt": "Say hello to {name}.",
+        },
+    )
+    assert "greet" in msg
+
+    out = agent._execute_tool("skill__greet", {"name": "Ada"})
+    assert out == "Say hello to Ada."

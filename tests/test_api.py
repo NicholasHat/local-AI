@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 import config
 import ollama_client
 import server
+import skills
 import vectorstore
 
 
@@ -163,3 +164,141 @@ def test_set_model_rejects_non_tool_capable_model(client, monkeypatch):
     monkeypatch.setattr(ollama_client, "list_models", lambda: _FAKE_MODELS)
     resp = client.post("/api/settings/model", json={"model": "nomic-embed-text:latest"})
     assert resp.status_code == 400
+
+
+@pytest.fixture
+def isolated_skills_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(skills, "SKILLS_DIR", tmp_path / "skills")
+    return tmp_path / "skills"
+
+
+def test_list_skills_empty(client, isolated_skills_dir):
+    assert client.get("/api/skills").json() == []
+
+
+def test_create_and_list_instruction_skill(client, isolated_skills_dir):
+    resp = client.post(
+        "/api/skills",
+        json={
+            "name": "greet",
+            "description": "Greets someone",
+            "parameters": {"name": {"type": "string"}},
+            "required": ["name"],
+            "prompt": "Say hello to {name}.",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["kind"] == "instruction"
+
+    listed = client.get("/api/skills").json()
+    assert listed == [
+        {
+            "name": "greet",
+            "description": "Greets someone",
+            "kind": "instruction",
+            "parameters": {"name": {"type": "string"}},
+            "required": ["name"],
+            "body": "Say hello to {name}.",
+        }
+    ]
+
+
+def test_create_code_skill_via_api(client, isolated_skills_dir):
+    resp = client.post(
+        "/api/skills",
+        json={
+            "name": "word-count",
+            "description": "Counts words",
+            "parameters": {"text": {"type": "string"}},
+            "required": ["text"],
+            "code": "def run(text):\n    return str(len(text.split()))\n",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["kind"] == "code"
+
+
+def test_create_skill_requires_exactly_one_of_prompt_or_code(
+    client, isolated_skills_dir
+):
+    resp = client.post("/api/skills", json={"name": "bad", "description": "d"})
+    assert resp.status_code == 400
+
+
+def test_update_skill_overwrites(client, isolated_skills_dir):
+    client.post(
+        "/api/skills",
+        json={"name": "greet", "description": "v1", "prompt": "Hi {name}"},
+    )
+    resp = client.put(
+        "/api/skills/greet",
+        json={"name": "greet", "description": "v2", "prompt": "Hello {name}!"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["description"] == "v2"
+
+
+def test_update_skill_rejects_name_mismatch(client, isolated_skills_dir):
+    resp = client.put(
+        "/api/skills/greet",
+        json={"name": "other", "description": "d", "prompt": "p"},
+    )
+    assert resp.status_code == 400
+
+
+def test_delete_skill(client, isolated_skills_dir):
+    client.post(
+        "/api/skills", json={"name": "greet", "description": "d", "prompt": "p"}
+    )
+    resp = client.delete("/api/skills/greet")
+    assert resp.status_code == 200
+    assert client.get("/api/skills").json() == []
+
+
+def test_delete_missing_skill_404s(client, isolated_skills_dir):
+    resp = client.delete("/api/skills/does-not-exist")
+    assert resp.status_code == 404
+
+
+def test_created_skill_is_immediately_usable_via_chat(
+    client, isolated_skills_dir, monkeypatch
+):
+    """The CRUD API and the agent loop share one registry — a skill created
+    through the API must be callable on the very next chat turn, with no
+    caching layer to invalidate."""
+    client.post(
+        "/api/skills",
+        json={
+            "name": "greet",
+            "description": "Greets someone",
+            "parameters": {"name": {"type": "string"}},
+            "required": ["name"],
+            "prompt": "Say hello to {name}.",
+        },
+    )
+
+    monkeypatch.setattr(ollama_client, "health_check", lambda: True)
+
+    state = {"n": 0}
+
+    def fake_chat(messages, tools=None, model=None):
+        names = [t["function"]["name"] for t in tools]
+        assert "skill__greet" in names
+        state["n"] += 1
+        if state["n"] == 1:
+            return {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"function": {"name": "skill__greet", "arguments": {"name": "Ada"}}}
+                ],
+            }
+        return {"role": "assistant", "content": "done", "tool_calls": None}
+
+    monkeypatch.setattr(ollama_client, "chat", fake_chat)
+    resp = client.post("/api/chat", json={"message": "greet Ada"})
+    assert resp.status_code == 200
+
+    transcript = client.get("/api/conversation").json()
+    tool_msg = next(m for m in transcript if m["role"] == "tool")
+    assert tool_msg["content"] == "Say hello to Ada."

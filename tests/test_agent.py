@@ -3,6 +3,7 @@ ollama_client — no live model."""
 
 import agent
 import ollama_client
+import skills
 from memory import Conversation
 
 
@@ -111,3 +112,21 @@ def test_run_passes_explicit_model_to_chat(monkeypatch):
     monkeypatch.setattr(ollama_client, "chat", fake_chat)
     agent.run("hi", Conversation(), model="llama3.1")
     assert captured["model"] == "llama3.1"
+
+
+def test_run_advertises_discovered_skills_as_tools(tmp_path, monkeypatch):
+    monkeypatch.setattr(skills, "SKILLS_DIR", tmp_path / "skills")
+    skills.write_skill("greet", "Greets someone", {}, [], prompt="Hi there.")
+
+    captured = {}
+
+    def fake_chat(messages, tools=None, model=None):
+        captured["tools"] = tools
+        return {"role": "assistant", "content": "done", "tool_calls": None}
+
+    monkeypatch.setattr(ollama_client, "chat", fake_chat)
+    agent.run("hi", Conversation())
+
+    names = [t["function"]["name"] for t in captured["tools"]]
+    assert "skill__greet" in names
+    assert "get_time" in names  # built-ins are still advertised alongside it

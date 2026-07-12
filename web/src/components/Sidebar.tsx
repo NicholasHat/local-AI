@@ -1,6 +1,13 @@
 import { useRef } from 'react'
-import type { DocumentInfo, HealthResponse, ModelInfo } from '../types'
+import type {
+  DocumentInfo,
+  HealthResponse,
+  ModelInfo,
+  SkillInfo,
+  SkillWriteRequest,
+} from '../types'
 import { ModelPicker } from './ModelPicker'
+import { SkillsPanel } from './SkillsPanel'
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -20,6 +27,11 @@ export function Sidebar({
   currentModel,
   switchingModel,
   onSelectModel,
+  skills,
+  skillsBusy,
+  onCreateSkill,
+  onUpdateSkill,
+  onDeleteSkill,
 }: {
   open: boolean
   health: HealthResponse | null
@@ -32,6 +44,11 @@ export function Sidebar({
   currentModel: string | null
   switchingModel: boolean
   onSelectModel: (name: string) => void
+  skills: SkillInfo[]
+  skillsBusy: boolean
+  onCreateSkill: (payload: SkillWriteRequest) => Promise<void>
+  onUpdateSkill: (name: string, payload: SkillWriteRequest) => Promise<void>
+  onDeleteSkill: (name: string) => void
 }) {
   const fileInput = useRef<HTMLInputElement>(null)
 
@@ -127,6 +144,14 @@ export function Sidebar({
             ))}
           </ul>
         </div>
+
+        <SkillsPanel
+          skills={skills}
+          busy={skillsBusy}
+          onCreate={onCreateSkill}
+          onUpdate={onUpdateSkill}
+          onDelete={onDeleteSkill}
+        />
 
         <button
           type="button"

@@ -20,54 +20,14 @@ import agent
 import config
 import ingest
 import vectorstore
-from memory import Conversation
+
+from .conftest import new_conversation, run_forcing_tool, tool_content, tool_names_used
 
 pytestmark = pytest.mark.e2e
 
 
-def _new_conversation() -> Conversation:
-    return Conversation(system_prompt=agent.SYSTEM_PROMPT)
-
-
-def _tool_names_used(conv: Conversation) -> list[str]:
-    return [m["tool_name"] for m in conv.messages if m["role"] == "tool"]
-
-
-def _tool_content(conv: Conversation, name: str) -> str:
-    for m in conv.messages:
-        if m["role"] == "tool" and m["tool_name"] == name:
-            return m["content"]
-    raise AssertionError(
-        f"tool {name!r} was never called; tools used: {_tool_names_used(conv)}"
-    )
-
-
-def _run_forcing_tool(
-    prompt: str, tool_name: str, attempts: int = 3
-) -> tuple[Conversation, str]:
-    """Retry a live prompt a few times before failing.
-
-    Tool-calling models don't invoke a tool 100% of the time even for a
-    directive prompt — retrying the whole live call is the honest way to
-    absorb that sampling noise, rather than loosening what we assert. Only
-    used for tools the model chooses to call (vs. read_pdf/fill_pdf, where an
-    explicit file path leaves the model no other way to answer).
-    """
-    last_conv: Conversation | None = None
-    for _ in range(attempts):
-        conv = _new_conversation()
-        reply = agent.run(prompt, conv)
-        if tool_name in _tool_names_used(conv):
-            return conv, reply
-        last_conv = conv
-    used = _tool_names_used(last_conv) if last_conv else []
-    raise AssertionError(
-        f"{tool_name!r} never called in {attempts} attempts; used: {used}"
-    )
-
-
 def test_get_time_e2e():
-    conv, reply = _run_forcing_tool(
+    conv, reply = run_forcing_tool(
         "What is the exact current time in UTC right now? Call your time "
         "tool rather than guessing, then tell me the hour and minute.",
         "get_time",
@@ -76,25 +36,25 @@ def test_get_time_e2e():
 
 
 def test_read_pdf_e2e(text_pdf):
-    conv = _new_conversation()
+    conv = new_conversation()
     reply = agent.run(
         f"Read the PDF at exactly this path: {text_pdf}. Quote its full text "
         "back to me verbatim.",
         conv,
     )
-    assert "read_pdf" in _tool_names_used(conv)
+    assert "read_pdf" in tool_names_used(conv)
     assert "hello rag world" in reply.lower()
 
 
 def test_pdf_form_fields_e2e(form_pdf, tmp_path):
-    conv = _new_conversation()
+    conv = new_conversation()
 
     agent.run(
         f"List the fillable form fields in the PDF at exactly this path: {form_pdf}",
         conv,
     )
-    assert "list_pdf_fields" in _tool_names_used(conv)
-    assert "full_name" in _tool_content(conv, "list_pdf_fields")
+    assert "list_pdf_fields" in tool_names_used(conv)
+    assert "full_name" in tool_content(conv, "list_pdf_fields")
 
     out_path = tmp_path / "filled_e2e.pdf"
     agent.run(
@@ -102,7 +62,7 @@ def test_pdf_form_fields_e2e(form_pdf, tmp_path):
         f"save the result to exactly this path: {out_path}",
         conv,
     )
-    assert "fill_pdf" in _tool_names_used(conv)
+    assert "fill_pdf" in tool_names_used(conv)
 
     # Verify against the actual written file, not the model's account of it.
     written = PdfReader(str(out_path)).get_fields()
@@ -110,15 +70,15 @@ def test_pdf_form_fields_e2e(form_pdf, tmp_path):
 
 
 def test_fill_refuses_non_form_pdf_e2e(plain_pdf, tmp_path):
-    conv = _new_conversation()
+    conv = new_conversation()
     out_path = tmp_path / "should_not_exist_e2e.pdf"
     agent.run(
         "Fill the field 'x' with value 'y' in the PDF at exactly this path: "
         f"{plain_pdf}, and save the result to exactly this path: {out_path}",
         conv,
     )
-    assert "fill_pdf" in _tool_names_used(conv)
-    assert "no AcroForm fields" in _tool_content(conv, "fill_pdf")
+    assert "fill_pdf" in tool_names_used(conv)
+    assert "no AcroForm fields" in tool_content(conv, "fill_pdf")
     assert not out_path.exists()
 
 
@@ -141,7 +101,7 @@ def test_ingest_and_search_e2e(isolated_rag):
         "The secret launch code is Zebra-Quasar-77.", source="launch-notes.txt"
     )
 
-    _, reply = _run_forcing_tool(
+    _, reply = run_forcing_tool(
         "Search my uploaded documents for the secret launch code and tell me "
         "exactly what it is.",
         "search_documents",
@@ -154,7 +114,7 @@ def test_read_uploaded_document_e2e(isolated_rag, text_pdf):
     dest = upload_dir / "resume.pdf"
     dest.write_bytes(text_pdf.read_bytes())
 
-    _, reply = _run_forcing_tool(
+    _, reply = run_forcing_tool(
         "Read the full text of the document named 'resume.pdf' that I "
         "uploaded, and quote it back to me verbatim.",
         "read_uploaded_document",

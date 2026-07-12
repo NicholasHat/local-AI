@@ -17,6 +17,7 @@ import agent
 import config
 import ingest
 import ollama_client
+import skills
 from memory import Conversation
 
 app = FastAPI(title="Local AI Assistant API")
@@ -197,3 +198,78 @@ def list_documents() -> list[DocumentInfo]:
         ),
         key=lambda d: d.filename,
     )
+
+
+class SkillInfo(BaseModel):
+    name: str
+    description: str
+    kind: str
+    parameters: dict
+    required: list[str]
+    body: str
+
+
+class SkillWriteRequest(BaseModel):
+    name: str
+    description: str
+    parameters: dict = {}
+    required: list[str] = []
+    prompt: str | None = None
+    code: str | None = None
+
+
+def _skill_info(s: skills.Skill) -> SkillInfo:
+    return SkillInfo(
+        name=s.name,
+        description=s.description,
+        kind=s.kind,
+        parameters=s.parameters,
+        required=s.required,
+        body=s.body,
+    )
+
+
+def _write_and_fetch(request: SkillWriteRequest) -> SkillInfo:
+    try:
+        skills.write_skill(
+            request.name,
+            request.description,
+            request.parameters,
+            request.required,
+            prompt=request.prompt,
+            code=request.code,
+        )
+    except skills.SkillError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    valid, _errors = skills.discover()
+    created = next(s for s in valid if s.name == request.name)
+    return _skill_info(created)
+
+
+@app.get("/api/skills", response_model=list[SkillInfo])
+def list_skills() -> list[SkillInfo]:
+    valid, _errors = skills.discover()
+    return [_skill_info(s) for s in valid]
+
+
+@app.post("/api/skills", response_model=SkillInfo)
+def create_skill_endpoint(request: SkillWriteRequest) -> SkillInfo:
+    return _write_and_fetch(request)
+
+
+@app.put("/api/skills/{name}", response_model=SkillInfo)
+def update_skill_endpoint(name: str, request: SkillWriteRequest) -> SkillInfo:
+    if request.name != name:
+        raise HTTPException(
+            status_code=400, detail="Path name and body name must match."
+        )
+    return _write_and_fetch(request)
+
+
+@app.delete("/api/skills/{name}")
+def delete_skill_endpoint(name: str) -> dict:
+    try:
+        skills.delete_skill(name)
+    except skills.SkillError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"status": "ok"}

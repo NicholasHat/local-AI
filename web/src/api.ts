@@ -8,6 +8,8 @@ import type {
   DocumentInfo,
   HealthResponse,
   ModelsResponse,
+  SkillInfo,
+  SkillWriteRequest,
   UploadResponse,
 } from './types'
 
@@ -53,4 +55,21 @@ export const api = {
 
   setModel: (model: string) =>
     request<ModelsResponse>('/settings/model', json({ model })),
+
+  skills: () => request<SkillInfo[]>('/skills'),
+
+  createSkill: (payload: SkillWriteRequest) =>
+    request<SkillInfo>('/skills', json(payload)),
+
+  updateSkill: (name: string, payload: SkillWriteRequest) =>
+    request<SkillInfo>(`/skills/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  deleteSkill: (name: string) =>
+    request<{ status: string }>(`/skills/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
 }

@@ -25,6 +25,7 @@ cd web && npm run build && npm run lint
 ## Key rules
 - All Ollama calls go through `ollama_client.py` — nowhere else
 - Tool dispatch lives in `agent.py` only — add new tools by adding a function in `tools/` and a case in `_execute_tool()`
+- The second way to add a tool: a skill (`skills.py`) — a directory under `skills/<name>/` with `skill.yaml` + `prompt.md` or `run.py`, discovered fresh every turn, no code change needed. See `skills/README.md`. The model's own `create_skill` tool can only write instruction skills (`prompt.md`), never code (`run.py`) — that boundary is structural, not a convention, and must stay that way.
 - Conversation history source of truth is `memory.py`, not Streamlit session state
 - Model name comes from env var `OLLAMA_MODEL`, never hardcoded
 - Use `pathlib.Path` for all file I/O
