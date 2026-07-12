@@ -15,9 +15,11 @@ See `plan.md` for current phase and task status. Read it at the start of every s
 ```bash
 streamlit run ui.py                        # legacy UI, removed in Phase 12
 uvicorn server:app --reload --port 8000    # FastAPI backend
+cd web && npm run dev                      # React frontend (localhost:5173)
 pytest tests/ -v          # fast, mocked, no live model
 pytest -m e2e -v          # live model required; skips cleanly if Ollama is down
 ruff check . && ruff format .
+cd web && npm run build && npm run lint
 ```
 
 ## Key rules
