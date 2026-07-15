@@ -5,12 +5,34 @@ export function ModelPicker({
   current,
   switching,
   onSelect,
+  compact = false,
 }: {
   models: ModelInfo[]
   current: string | null
   switching: boolean
   onSelect: (name: string) => void
+  compact?: boolean
 }) {
+  if (compact) {
+    return (
+      <select
+        value={current ?? ''}
+        disabled={switching || models.length === 0}
+        onChange={(e) => onSelect(e.target.value)}
+        aria-label="Model"
+        className="rounded-full border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 outline-none disabled:opacity-50"
+      >
+        {current === null && <option value="">No model</option>}
+        {models.map((m) => (
+          <option key={m.name} value={m.name} disabled={!m.tool_capable}>
+            {m.name}
+            {m.tool_capable ? '' : ' (no tool support)'}
+          </option>
+        ))}
+      </select>
+    )
+  }
+
   return (
     <div>
       <h2 className="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">

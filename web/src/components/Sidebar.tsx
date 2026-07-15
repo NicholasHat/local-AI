@@ -1,13 +1,5 @@
 import { useRef } from 'react'
-import type {
-  DocumentInfo,
-  HealthResponse,
-  ModelInfo,
-  SkillInfo,
-  SkillWriteRequest,
-} from '../types'
-import { ModelPicker } from './ModelPicker'
-import { SkillsPanel } from './SkillsPanel'
+import type { DocumentInfo, HealthResponse } from '../types'
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -15,40 +7,55 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+export type View = 'chat' | 'skills'
+
+function NavButton({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean
+  onClick: () => void
+  icon: string
+  label: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-medium transition ${
+        active
+          ? 'bg-denim-100 text-denim-800'
+          : 'text-neutral-600 hover:bg-neutral-100'
+      }`}
+    >
+      <span aria-hidden>{icon}</span>
+      {label}
+    </button>
+  )
+}
+
 export function Sidebar({
   open,
+  view,
+  onChangeView,
   health,
   documents,
   uploading,
   onUpload,
-  onReset,
+  onNewChat,
   onRecheckHealth,
-  models,
-  currentModel,
-  switchingModel,
-  onSelectModel,
-  skills,
-  skillsBusy,
-  onCreateSkill,
-  onUpdateSkill,
-  onDeleteSkill,
 }: {
   open: boolean
+  view: View
+  onChangeView: (view: View) => void
   health: HealthResponse | null
   documents: DocumentInfo[]
   uploading: boolean
   onUpload: (file: File) => void
-  onReset: () => void
+  onNewChat: () => void
   onRecheckHealth: () => void
-  models: ModelInfo[]
-  currentModel: string | null
-  switchingModel: boolean
-  onSelectModel: (name: string) => void
-  skills: SkillInfo[]
-  skillsBusy: boolean
-  onCreateSkill: (payload: SkillWriteRequest) => Promise<void>
-  onUpdateSkill: (name: string, payload: SkillWriteRequest) => Promise<void>
-  onDeleteSkill: (name: string) => void
 }) {
   const fileInput = useRef<HTMLInputElement>(null)
 
@@ -68,39 +75,45 @@ export function Sidebar({
           }
         : {
             text: `Connected · ${health.model}`,
-            tone: 'text-emerald-700',
-            dot: 'bg-emerald-500',
+            tone: 'text-denim-700',
+            dot: 'bg-denim-500',
           }
 
   return (
     <aside
-      className={`w-72 shrink-0 border-r border-neutral-200 bg-neutral-50 transition-all duration-200 ${
+      className={`w-64 shrink-0 border-r border-neutral-200 bg-neutral-50 transition-all duration-200 ${
         open ? 'block' : 'hidden'
       } md:block`}
     >
-      <div className="flex h-full flex-col gap-6 overflow-y-auto p-5">
-        <div>
-          <h1 className="text-lg font-semibold text-neutral-900">
-            Local AI Assistant
-          </h1>
-          <button
-            type="button"
-            onClick={onRecheckHealth}
-            className="mt-2 flex items-center gap-2 text-sm"
-          >
-            <span className={`h-2 w-2 rounded-full ${statusLabel.dot}`} />
-            <span className={statusLabel.tone}>{statusLabel.text}</span>
-          </button>
-        </div>
+      <div className="flex h-full flex-col gap-5 p-4">
+        <h1 className="px-1 text-lg font-semibold text-neutral-900">
+          Local AI Assistant
+        </h1>
 
-        <ModelPicker
-          models={models}
-          current={currentModel}
-          switching={switchingModel}
-          onSelect={onSelectModel}
-        />
+        <button
+          type="button"
+          onClick={onNewChat}
+          className="flex w-full items-center gap-2 rounded-lg border border-neutral-300 bg-white px-2.5 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-100"
+        >
+          <span aria-hidden>+</span> New chat
+        </button>
 
-        <div>
+        <nav className="flex flex-col gap-1">
+          <NavButton
+            active={view === 'chat'}
+            onClick={() => onChangeView('chat')}
+            icon="💬"
+            label="Chat"
+          />
+          <NavButton
+            active={view === 'skills'}
+            onClick={() => onChangeView('skills')}
+            icon="⚙️"
+            label="Skills"
+          />
+        </nav>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
           <h2 className="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">
             Documents
           </h2>
@@ -108,7 +121,7 @@ export function Sidebar({
             type="button"
             onClick={() => fileInput.current?.click()}
             disabled={uploading}
-            className="w-full rounded-lg border border-dashed border-neutral-300 px-3 py-2 text-sm text-neutral-600 hover:border-neutral-400 disabled:opacity-50"
+            className="w-full rounded-lg border border-dashed border-neutral-300 px-3 py-2 text-sm text-neutral-600 hover:border-denim-400 disabled:opacity-50"
           >
             {uploading ? 'Indexing…' : 'Upload a PDF'}
           </button>
@@ -145,20 +158,13 @@ export function Sidebar({
           </ul>
         </div>
 
-        <SkillsPanel
-          skills={skills}
-          busy={skillsBusy}
-          onCreate={onCreateSkill}
-          onUpdate={onUpdateSkill}
-          onDelete={onDeleteSkill}
-        />
-
         <button
           type="button"
-          onClick={onReset}
-          className="mt-auto w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-100"
+          onClick={onRecheckHealth}
+          className="flex items-center gap-2 border-t border-neutral-200 pt-3 text-sm"
         >
-          Clear conversation
+          <span className={`h-2 w-2 rounded-full ${statusLabel.dot}`} />
+          <span className={statusLabel.tone}>{statusLabel.text}</span>
         </button>
       </div>
     </aside>

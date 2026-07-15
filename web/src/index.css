@@ -1,5 +1,19 @@
 @import "tailwindcss";
 
+/* Jeans blue — the app's single accent color. Gray/white carry everything else. */
+@theme {
+  --color-denim-50: #f2f6fa;
+  --color-denim-100: #e3ebf3;
+  --color-denim-200: #c7d7e8;
+  --color-denim-300: #a3bcd8;
+  --color-denim-400: #7a9ac2;
+  --color-denim-500: #5a7ea8;
+  --color-denim-600: #46698d;
+  --color-denim-700: #395672;
+  --color-denim-800: #2f465c;
+  --color-denim-900: #283a4c;
+}
+
 :root {
   color-scheme: light;
 }

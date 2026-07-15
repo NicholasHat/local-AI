@@ -5,4 +5,4 @@ parameters:
     type: string
     description: The text to count words in.
 required:
-  - text
+- text

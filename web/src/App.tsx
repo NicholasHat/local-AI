@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from './api'
+import { ActivityLog } from './components/ActivityLog'
 import { Composer } from './components/Composer'
 import { Sidebar } from './components/Sidebar'
+import type { View } from './components/Sidebar'
+import { SkillsPage } from './components/SkillsPage'
 import { Transcript } from './components/Transcript'
 import type {
   ConversationMessage,
@@ -35,6 +38,8 @@ function App() {
   const [skillsBusy, setSkillsBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [view, setView] = useState<View>('chat')
+  const [activityLogOpen, setActivityLogOpen] = useState(false)
 
   const refreshHealth = useCallback(async () => setHealth(await api.health()), [])
   const refreshConversation = useCallback(
@@ -98,7 +103,7 @@ function App() {
     }
   }
 
-  async function handleReset() {
+  async function handleNewChat() {
     setError(null)
     try {
       await api.resetConversation()
@@ -172,7 +177,7 @@ function App() {
         <button
           type="button"
           onClick={load}
-          className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white"
+          className="rounded-lg bg-denim-600 px-4 py-2 text-sm font-medium text-white"
         >
           Retry
         </button>
@@ -186,35 +191,38 @@ function App() {
     <div className="flex h-screen bg-neutral-100">
       <Sidebar
         open={sidebarOpen}
+        view={view}
+        onChangeView={(v) => {
+          setView(v)
+          setSidebarOpen(false)
+        }}
         health={health}
         documents={documents}
         uploading={uploading}
         onUpload={handleUpload}
-        onReset={handleReset}
+        onNewChat={handleNewChat}
         onRecheckHealth={refreshHealth}
-        models={modelsInfo.models}
-        currentModel={modelsInfo.current}
-        switchingModel={switchingModel}
-        onSelectModel={handleSelectModel}
-        skills={skills}
-        skillsBusy={skillsBusy}
-        onCreateSkill={handleCreateSkill}
-        onUpdateSkill={handleUpdateSkill}
-        onDeleteSkill={handleDeleteSkill}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center gap-3 border-b border-neutral-200 bg-white px-4 py-3 md:hidden">
+        <div className="flex items-center gap-3 border-b border-neutral-200 bg-white px-4 py-3">
           <button
             type="button"
             onClick={() => setSidebarOpen((v) => !v)}
-            className="rounded-md border border-neutral-300 px-2 py-1 text-sm"
+            className="rounded-md border border-neutral-300 px-2 py-1 text-sm md:hidden"
           >
             ☰
           </button>
-          <span className="font-medium text-neutral-800">
+          <span className="font-medium text-neutral-800 md:hidden">
             Local AI Assistant
           </span>
+          <button
+            type="button"
+            onClick={() => setActivityLogOpen(true)}
+            className="ml-auto flex items-center gap-1.5 rounded-full border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:border-denim-400 hover:text-denim-700"
+          >
+            <span aria-hidden>🗒️</span> Activity log
+          </button>
         </div>
 
         {error && (
@@ -233,14 +241,39 @@ function App() {
           </div>
         ) : null}
 
-        <Transcript
-          messages={messages}
-          pendingMessage={pendingMessage}
-          thinking={thinking}
-        />
-
-        <Composer disabled={chatDisabled} onSend={handleSend} />
+        {view === 'chat' ? (
+          <>
+            <Transcript
+              messages={messages}
+              pendingMessage={pendingMessage}
+              thinking={thinking}
+            />
+            <Composer
+              disabled={chatDisabled}
+              onSend={handleSend}
+              models={modelsInfo.models}
+              currentModel={modelsInfo.current}
+              switchingModel={switchingModel}
+              onSelectModel={handleSelectModel}
+            />
+          </>
+        ) : (
+          <SkillsPage
+            skills={skills}
+            busy={skillsBusy}
+            onCreate={handleCreateSkill}
+            onUpdate={handleUpdateSkill}
+            onDelete={handleDeleteSkill}
+          />
+        )}
       </div>
+
+      <ActivityLog
+        open={activityLogOpen}
+        onClose={() => setActivityLogOpen(false)}
+        messages={messages}
+        thinking={thinking}
+      />
     </div>
   )
 }

@@ -35,7 +35,7 @@ export function MessageBubble({
     <div
       className={`max-w-2xl rounded-2xl px-4 py-3 text-[15px] leading-relaxed ${
         isUser
-          ? 'self-end bg-neutral-900 text-white whitespace-pre-wrap'
+          ? 'self-end bg-denim-600 text-white whitespace-pre-wrap'
           : 'self-start bg-white text-neutral-800 shadow-sm ring-1 ring-neutral-200'
       } ${pending ? 'opacity-60' : ''}`}
     >

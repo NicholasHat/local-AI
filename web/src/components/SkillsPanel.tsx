@@ -104,130 +104,133 @@ export function SkillsPanel({
     }
   }
 
-  return (
-    <div>
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-xs font-semibold tracking-wide text-neutral-500 uppercase">
-          Skills
-        </h2>
-        {editingName === null && (
-          <button
-            type="button"
-            onClick={startCreate}
-            className="text-xs font-medium text-neutral-600 hover:text-neutral-900"
-          >
-            + New
-          </button>
-        )}
-      </div>
-
-      {editingName === null && (
-        <ul className="flex flex-col gap-1">
-          {skills.length === 0 && (
-            <li className="text-sm text-neutral-400">No skills yet.</li>
-          )}
-          {skills.map((s) => (
-            <li
-              key={s.name}
-              className="rounded-md px-2 py-1 text-sm text-neutral-700 hover:bg-neutral-100"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={() => startEdit(s)}
-                  className="min-w-0 flex-1 truncate text-left"
-                  title={s.description}
-                >
-                  {s.name}
-                  <span className="ml-1 text-xs text-neutral-400">
-                    ({s.kind})
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onDelete(s.name)}
-                  className="shrink-0 text-xs text-neutral-400 hover:text-red-600"
-                  aria-label={`Delete ${s.name}`}
-                >
-                  ✕
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {editingName !== null && (
-        <div className="flex flex-col gap-2 rounded-lg border border-neutral-200 bg-white p-3">
+  if (editingName !== null) {
+    return (
+      <div className="flex flex-col gap-3 rounded-xl border border-neutral-200 bg-white p-5">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <input
             value={form.name}
             disabled={editingName !== 'new'}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
             placeholder="slug-name"
-            className="rounded-md border border-neutral-300 px-2 py-1 text-sm disabled:opacity-50"
-          />
-          <input
-            value={form.description}
-            onChange={(e) => setForm({ ...form, description: e.target.value })}
-            placeholder="Description"
-            className="rounded-md border border-neutral-300 px-2 py-1 text-sm"
+            className="rounded-md border border-neutral-300 px-3 py-2 text-sm disabled:opacity-50"
           />
           <select
             value={form.kind}
             onChange={(e) =>
               setForm({ ...form, kind: e.target.value as 'instruction' | 'code' })
             }
-            className="rounded-md border border-neutral-300 px-2 py-1 text-sm"
+            className="rounded-md border border-neutral-300 px-3 py-2 text-sm"
           >
             <option value="instruction">Instruction (prompt.md)</option>
             <option value="code">Code (run.py)</option>
           </select>
+        </div>
+        <input
+          value={form.description}
+          onChange={(e) => setForm({ ...form, description: e.target.value })}
+          placeholder="Description"
+          className="rounded-md border border-neutral-300 px-3 py-2 text-sm"
+        />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <textarea
             value={form.parametersText}
             onChange={(e) => setForm({ ...form, parametersText: e.target.value })}
             placeholder='Parameters JSON, e.g. {"text": {"type": "string"}}'
             rows={3}
-            className="rounded-md border border-neutral-300 px-2 py-1 font-mono text-xs"
+            className="rounded-md border border-neutral-300 px-3 py-2 font-mono text-xs"
           />
           <input
             value={form.requiredText}
             onChange={(e) => setForm({ ...form, requiredText: e.target.value })}
             placeholder="Required args, comma-separated"
-            className="rounded-md border border-neutral-300 px-2 py-1 text-sm"
+            className="h-fit rounded-md border border-neutral-300 px-3 py-2 text-sm"
           />
-          <textarea
-            value={form.body}
-            onChange={(e) => setForm({ ...form, body: e.target.value })}
-            placeholder={
-              form.kind === 'instruction'
-                ? 'Instruction template, use {arg_name} placeholders'
-                : 'def run(**args) -> str: ...'
-            }
-            rows={6}
-            className="rounded-md border border-neutral-300 px-2 py-1 font-mono text-xs"
-          />
+        </div>
+        <textarea
+          value={form.body}
+          onChange={(e) => setForm({ ...form, body: e.target.value })}
+          placeholder={
+            form.kind === 'instruction'
+              ? 'Instruction template, use {arg_name} placeholders'
+              : 'def run(**args) -> str: ...'
+          }
+          rows={10}
+          className="rounded-md border border-neutral-300 px-3 py-2 font-mono text-xs"
+        />
 
-          {formError && <p className="text-xs text-red-600">{formError}</p>}
+        {formError && <p className="text-xs text-red-600">{formError}</p>}
 
-          <div className="flex gap-2">
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={submit}
+            disabled={busy}
+            className="rounded-md bg-denim-600 px-4 py-2 text-sm font-medium text-white hover:bg-denim-700 disabled:opacity-50"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={cancel}
+            className="rounded-md border border-neutral-300 px-4 py-2 text-sm hover:bg-neutral-50"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-end">
+        <button
+          type="button"
+          onClick={startCreate}
+          className="rounded-full bg-denim-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-denim-700"
+        >
+          + New skill
+        </button>
+      </div>
+
+      {skills.length === 0 && (
+        <p className="text-sm text-neutral-400">No skills yet — create one to get started.</p>
+      )}
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {skills.map((s) => (
+          <div
+            key={s.name}
+            className="flex flex-col gap-2 rounded-xl border border-neutral-200 bg-white p-4"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="truncate font-medium text-neutral-900">{s.name}</p>
+                <span className="inline-block rounded-full bg-denim-50 px-2 py-0.5 text-xs font-medium text-denim-700">
+                  {s.kind}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onDelete(s.name)}
+                className="shrink-0 text-xs text-neutral-400 hover:text-red-600"
+                aria-label={`Delete ${s.name}`}
+              >
+                ✕
+              </button>
+            </div>
+            <p className="line-clamp-2 text-sm text-neutral-600">{s.description}</p>
             <button
               type="button"
-              onClick={submit}
-              disabled={busy}
-              className="flex-1 rounded-md bg-neutral-900 px-2 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+              onClick={() => startEdit(s)}
+              className="mt-auto self-start text-sm font-medium text-denim-600 hover:text-denim-800"
             >
-              Save
-            </button>
-            <button
-              type="button"
-              onClick={cancel}
-              className="rounded-md border border-neutral-300 px-2 py-1.5 text-sm"
-            >
-              Cancel
+              Edit
             </button>
           </div>
-        </div>
-      )}
+        ))}
+      </div>
     </div>
   )
 }
