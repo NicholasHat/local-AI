@@ -1,10 +1,21 @@
 import { useRef } from 'react'
-import type { DocumentInfo, HealthResponse } from '../types'
+import type { ConversationMeta, DocumentInfo, HealthResponse } from '../types'
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function formatRelativeTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime()
+  const minutes = Math.round(diffMs / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.round(hours / 24)
+  return `${days}d ago`
 }
 
 export type View = 'chat' | 'skills'
@@ -44,8 +55,13 @@ export function Sidebar({
   documents,
   uploading,
   onUpload,
+  onDeleteDocument,
   onNewChat,
   onRecheckHealth,
+  conversations,
+  activeConversationId,
+  onSelectConversation,
+  onDeleteConversation,
 }: {
   open: boolean
   view: View
@@ -54,8 +70,13 @@ export function Sidebar({
   documents: DocumentInfo[]
   uploading: boolean
   onUpload: (file: File) => void
+  onDeleteDocument: (filename: string) => void
   onNewChat: () => void
   onRecheckHealth: () => void
+  conversations: ConversationMeta[]
+  activeConversationId: string | null
+  onSelectConversation: (id: string) => void
+  onDeleteConversation: (id: string) => void
 }) {
   const fileInput = useRef<HTMLInputElement>(null)
 
@@ -113,49 +134,102 @@ export function Sidebar({
           />
         </nav>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <h2 className="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">
-            Documents
-          </h2>
-          <button
-            type="button"
-            onClick={() => fileInput.current?.click()}
-            disabled={uploading}
-            className="w-full rounded-lg border border-dashed border-neutral-300 px-3 py-2 text-sm text-neutral-600 hover:border-denim-400 disabled:opacity-50"
-          >
-            {uploading ? 'Indexing…' : 'Upload a PDF'}
-          </button>
-          <input
-            ref={fileInput}
-            type="file"
-            accept="application/pdf"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) onUpload(file)
-              e.target.value = ''
-            }}
-          />
+        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto">
+          <div>
+            <h2 className="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">
+              History
+            </h2>
+            <ul className="flex flex-col gap-0.5">
+              {conversations.length === 0 && (
+                <li className="text-sm text-neutral-400">No past chats yet.</li>
+              )}
+              {conversations.map((c) => (
+                <li
+                  key={c.id}
+                  className={`group flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm ${
+                    c.id === activeConversationId
+                      ? 'bg-denim-100 text-denim-800'
+                      : 'text-neutral-700 hover:bg-neutral-100'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onSelectConversation(c.id)}
+                    className="min-w-0 flex-1 truncate text-left"
+                    title={c.title}
+                  >
+                    {c.title}
+                    <span className="ml-1.5 text-xs text-neutral-400">
+                      {formatRelativeTime(c.updated_at)}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDeleteConversation(c.id)}
+                    className="shrink-0 text-xs text-neutral-400 opacity-0 group-hover:opacity-100 hover:text-red-600"
+                    aria-label={`Delete chat ${c.title}`}
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
 
-          <ul className="mt-3 flex flex-col gap-1">
-            {documents.length === 0 && (
-              <li className="text-sm text-neutral-400">
-                No documents uploaded yet.
-              </li>
-            )}
-            {documents.map((doc) => (
-              <li
-                key={doc.filename}
-                className="flex items-center justify-between rounded-md px-2 py-1 text-sm text-neutral-700"
-                title={doc.filename}
-              >
-                <span className="truncate">{doc.filename}</span>
-                <span className="ml-2 shrink-0 text-xs text-neutral-400">
-                  {formatSize(doc.size_bytes)}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div>
+            <h2 className="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">
+              Documents
+            </h2>
+            <button
+              type="button"
+              onClick={() => fileInput.current?.click()}
+              disabled={uploading}
+              className="w-full rounded-lg border border-dashed border-neutral-300 px-3 py-2 text-sm text-neutral-600 hover:border-denim-400 disabled:opacity-50"
+            >
+              {uploading ? 'Indexing…' : 'Upload a PDF'}
+            </button>
+            <input
+              ref={fileInput}
+              type="file"
+              accept="application/pdf"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) onUpload(file)
+                e.target.value = ''
+              }}
+            />
+
+            <ul className="mt-3 flex flex-col gap-1">
+              {documents.length === 0 && (
+                <li className="text-sm text-neutral-400">
+                  No documents uploaded yet.
+                </li>
+              )}
+              {documents.map((doc) => (
+                <li
+                  key={doc.filename}
+                  className="group flex items-center justify-between rounded-md px-2 py-1 text-sm text-neutral-700"
+                  title={doc.filename}
+                >
+                  <span className="truncate">{doc.filename}</span>
+                  <span className="ml-2 flex shrink-0 items-center gap-1.5">
+                    <span className="text-xs text-neutral-400">
+                      {formatSize(doc.size_bytes)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteDocument(doc.filename)}
+                      className="text-xs text-neutral-400 opacity-0 group-hover:opacity-100 hover:text-red-600"
+                      aria-label={`Remove ${doc.filename}`}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
 
         <button

@@ -5,9 +5,12 @@
 import type {
   ChatResponse,
   ConversationMessage,
+  ConversationMeta,
   DocumentInfo,
   HealthResponse,
+  ModelLibraryEntry,
   ModelsResponse,
+  PullProgress,
   SkillInfo,
   SkillWriteRequest,
   UploadResponse,
@@ -32,13 +35,55 @@ function json(body: unknown): RequestInit {
   }
 }
 
+async function pullModel(
+  name: string,
+  onProgress: (update: PullProgress) => void,
+): Promise<void> {
+  const response = await fetch(`${BASE}/models/pull`, json({ name }))
+  if (!response.ok || !response.body) {
+    const detail = await response.text()
+    throw new Error(`/models/pull failed (${response.status}): ${detail}`)
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const events = buffer.split('\n\n')
+    buffer = events.pop() ?? ''
+    for (const event of events) {
+      const line = event.trim()
+      if (!line.startsWith('data:')) continue
+      const payload = line.slice('data:'.length).trim()
+      if (payload) onProgress(JSON.parse(payload) as PullProgress)
+    }
+  }
+}
+
 export const api = {
   health: () => request<HealthResponse>('/health'),
 
   getConversation: () => request<ConversationMessage[]>('/conversation'),
 
-  resetConversation: () =>
-    request<{ status: string }>('/conversation/reset', { method: 'POST' }),
+  conversations: () => request<ConversationMeta[]>('/conversations'),
+
+  activeConversation: () => request<ConversationMeta>('/conversations/active'),
+
+  newConversation: () =>
+    request<ConversationMeta>('/conversations', { method: 'POST' }),
+
+  activateConversation: (id: string) =>
+    request<ConversationMeta>(`/conversations/${encodeURIComponent(id)}/activate`, {
+      method: 'POST',
+    }),
+
+  deleteConversation: (id: string) =>
+    request<{ status: string }>(`/conversations/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
 
   chat: (message: string) =>
     request<ChatResponse>('/chat', json({ message })),
@@ -51,10 +96,24 @@ export const api = {
 
   documents: () => request<DocumentInfo[]>('/documents'),
 
+  deleteDocument: (filename: string) =>
+    request<{ status: string }>(`/documents/${encodeURIComponent(filename)}`, {
+      method: 'DELETE',
+    }),
+
   models: () => request<ModelsResponse>('/models'),
 
   setModel: (model: string) =>
     request<ModelsResponse>('/settings/model', json({ model })),
+
+  modelLibrary: () => request<ModelLibraryEntry[]>('/models/library'),
+
+  pullModel,
+
+  deleteModel: (name: string) =>
+    request<{ status: string }>(`/models/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
 
   skills: () => request<SkillInfo[]>('/skills'),
 

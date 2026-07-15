@@ -20,6 +20,15 @@ class Conversation:
         if system_prompt:
             self._messages.append({"role": "system", "content": system_prompt})
 
+    @classmethod
+    def from_messages(cls, messages: list[dict]) -> "Conversation":
+        """Reconstruct a conversation from a previously persisted message
+        list (conversations.py) without re-seeding a system prompt — the
+        restored messages already include one."""
+        conversation = cls()
+        conversation._messages = list(messages)
+        return conversation
+
     @property
     def messages(self) -> list[dict]:
         """A copy of the history, ready to pass to ollama_client.chat()."""

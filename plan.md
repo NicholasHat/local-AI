@@ -4,11 +4,16 @@ A local, private assistant built on Ollama with a tool-calling agent loop, PDF
 read/fill tools, and RAG over local documents. No cloud APIs. See `CLAUDE.md`
 for the pinned stack and hard rules — this plan sequences the build.
 
-**Status (2026-07-12): Phases 1–12 all complete.** The app is FastAPI +
-React (`web/`), with model selection and a file-based skills system; the
-Streamlit UI (Phase 6) has been fully cut over and removed (Phase 12). See
-each phase's "Done when" line for what was verified. Next work is whatever
-comes after the "Later enhancements" list below, or a fresh ask.
+**Status (2026-07-15): Phases 1–15 complete.** Plus a Perplexity-style React
+redesign (denim-blue/gray/white theme, autosizing composer, inline model
+picker, a standalone Skills page, and a tool-activity log panel — not
+separately phased, done as a direct UI request). The app is FastAPI + React
+(`web/`), with model selection, a file-based skills system, persisted
+multi-conversation history, document removal, and pulling additional models
+from the browser. The Streamlit UI (Phase 6) has been fully cut over and
+removed (Phase 12). See each phase's "Done when" line for what was verified.
+Next work is whatever comes after the "Later enhancements" list below, or a
+fresh ask.
 
 ## Guiding principle
 
@@ -358,10 +363,164 @@ suite plus skills/model-selection works from the React UI.
 
 ---
 
+## Key decisions for Phases 13–15 (planned 2026-07-15)
+
+1. **Documents (Phase 13) before history (Phase 14) before model pulling
+   (Phase 15).** Deletion is the smallest, lowest-risk change and exercises
+   `vectorstore.py`'s delete path that Phase 14 doesn't need but is good to
+   have proven first. History is the largest architectural change (the
+   single-conversation assumption threaded through `server.py` and the
+   frontend). Model pulling is independent of the other two and can slot in
+   any time after — ordered last because it introduces this app's first
+   streaming endpoint, the highest-risk primitive of the three.
+
+2. **Conversations are JSON files, not a database.** Consistent with this
+   project's existing file-based patterns (`skills/<name>/`, uploaded PDFs
+   under `uploads/`) rather than introducing SQLite or another new
+   dependency for what's a handful of small, human-readable records. A new
+   `conversations.py` (mirrors `skills.py`'s discover/load/save shape) owns
+   `conversations/<id>.json` — each file holds `{id, title, created_at,
+   updated_at, messages}`. `conversations/` gets gitignored alongside
+   `uploads/` and `chroma/`.
+
+3. **`GET /api/conversation` and `POST /api/conversation/reset` are
+   replaced, not deprecated-in-place.** Once conversations persist, "the one
+   active conversation" becomes "the currently active conversation among
+   many" — keeping the old singular endpoints around as a compatibility
+   shim would contradict CLAUDE.md's "no backwards-compat hacks" rule. The
+   frontend's `handleNewChat` moves from resetting the one conversation to
+   creating a new one via the Phase 14 endpoints.
+
+4. **Model pulling reuses SSE**, the same streaming primitive already
+   earmarked for token streaming in "Later enhancements" below — pull
+   progress is the first real use of it, ahead of chat streaming, but the
+   plumbing (a `StreamingResponse` route) is the same shape either way.
+
+5. **No new frontend dependencies for any of the three.** History gets a
+   plain list in the existing `Sidebar`; the model manager extends the
+   existing composer-adjacent `ModelPicker` area. No router, no state
+   library — same posture as the existing app.
+
+---
+
+## Phase 13 — Remove attached documents
+
+Small, self-contained: a document uploaded via the sidebar can currently
+never be un-attached short of restarting with a fresh `uploads/`/`chroma/`.
+
+- `vectorstore.py`: add `delete_by_source(source: str) -> None` —
+  `get_collection().delete(where={"source": source})`. Mirrors `add`/`query`
+  as a thin Chroma passthrough.
+- `server.py`: `DELETE /api/documents/{filename}` — path-traversal-safe
+  (reject any filename where `Path(filename).name != filename`, same
+  discipline as the Phase 11 skills-name validation), delete the file from
+  `config.get_upload_dir()`, call `vectorstore.delete_by_source(filename)`,
+  404 if the file doesn't exist.
+- `web/src/api.ts`: add `deleteDocument(filename)`. `Sidebar.tsx`: a ✕
+  button per document row (same pattern already used for skills deletion),
+  wired through `App.tsx`'s existing `refreshDocuments` flow.
+- Tests: `vectorstore.delete_by_source` against a temp Chroma path (real
+  Chroma, no mock needed — it's fast); API contract test mocked; a
+  path-traversal rejection test (`../../etc/passwd` etc.).
+
+**Done when:** uploading a PDF, deleting it from the sidebar, and then
+asking a question that only that PDF could answer shows `search_documents`
+finds nothing — proving both the file and its embedded chunks are gone, not
+just the sidebar row.
+
+## Phase 14 — Persisted, multi-conversation history
+
+The biggest of the three. Today's `server.py` holds one module-level
+`Conversation` that "New chat" wipes — there is no way to go back.
+
+- `conversations.py` (new registry, file-based per decision 2 above):
+  - `create() -> ConversationMeta` — new empty conversation, `id` (e.g.
+    `uuid4().hex[:12]`), `title=None`, timestamps.
+  - `save(id, conversation: Conversation)` — writes `conversations/<id>.json`
+    (messages via `conversation.messages`, per `memory.py`'s existing
+    `Conversation` class, unchanged). Sets `title` from the first user
+    message (truncated ~40 chars) the first time it's non-empty; title is
+    static after that — no extra model call to summarize it.
+  - `load(id) -> Conversation` — reconstructs a `memory.py` `Conversation`
+    from the stored messages.
+  - `list_recent(limit=20) -> list[ConversationMeta]` — `{id, title,
+    updated_at}` sorted newest first; this is the "short list" the sidebar
+    renders.
+  - `delete(id)` — removes the file.
+- `server.py`: replace the single `_conversation` global with
+  `_active_conversation_id`, loading/saving via `conversations.py` around
+  each mutation (`/api/chat`, `/api/upload`'s system note). Small
+  conversations, no in-memory caching needed — load-modify-save per request
+  is simple and correct.
+  - `GET /api/conversations` → the short history list.
+  - `POST /api/conversations` → create + activate a new one (replaces
+    `/api/conversation/reset`'s role as "New chat").
+  - `POST /api/conversations/{id}/activate` → switch the active
+    conversation.
+  - `GET /api/conversation` stays as-is in shape (returns the *active*
+    conversation's messages) so `Transcript` doesn't need to change how it
+    fetches — only which conversation backs it.
+  - `DELETE /api/conversations/{id}` → remove a past chat; if it was active,
+    fall back to the most recent remaining one (or create a fresh one if
+    none remain).
+- Frontend: `Sidebar.tsx` gains a "History" list below the Chat/Skills nav —
+  title + relative timestamp, click to activate + refresh the transcript, ✕
+  to delete (same pattern as Documents/Skills). "New chat" now calls
+  `POST /api/conversations` instead of the old reset endpoint.
+- Tests: `conversations.py` unit tests (create/list/load/delete, JSON
+  round-trip, title truncation); API contract tests mocked; one test that
+  reloads a fresh `conversations.py`/`Conversation` from disk mid-test
+  (simulating a backend restart) and confirms history survives — this is
+  the actual point of persisting, so it must be asserted, not assumed.
+
+**Done when:** starting a new chat preserves the previous one in a visible
+history list, clicking a past chat restores its exact transcript, deleting
+one removes it from disk, and restarting `uvicorn` still shows the same
+history (proves persistence, not just in-memory state).
+
+## Phase 15 — Pull additional local models
+
+Today's model picker only lists models already pulled. This adds the other
+half: getting new ones onto the machine from the browser.
+
+- `ollama_client.py`: `pull_model(name: str)` — thin wrapper around the SDK's
+  `client.pull(model=name, stream=True)`, yielding normalized progress dicts
+  (`status`, `completed`, `total`) as they arrive. Still just passthrough —
+  no retry/business logic, per the thin-wrapper rule. Add `delete_model(name)`
+  too (`client.delete()`) so models can be removed as well as added.
+- `server.py`:
+  - `GET /api/models/library` — a small curated static list of recommended
+    tags (e.g. `qwen2.5`, `llama3.1`, `mistral`, `gemma2`, `phi3`), each
+    flagged tool-capable or not from the same knowledge already encoded for
+    installed models. Ollama has no public model-search API, so this is a
+    hand-maintained list, not a live catalog — the user can also type an
+    arbitrary tag outside the curated set.
+  - `POST /api/models/pull` — `{name}`, `StreamingResponse` (SSE,
+    `text/event-stream`) forwarding `pull_model`'s progress events to the
+    client. This app's first streaming route (decision 4 above).
+  - `DELETE /api/models/{name}` → `ollama_client.delete_model`.
+- Frontend: extend the composer-adjacent model area with an "+ Add model"
+  affordance — pick from the curated list or type a tag, a progress bar
+  fed by the SSE stream, refresh `GET /api/models` on completion. Per-model
+  ✕ (delete) alongside it. No new state library — an `EventSource` or
+  `fetch` + `ReadableStream` read loop is enough.
+- Tests: `pull_model`/`delete_model` unit tests against a mocked client
+  (assert passthrough of streamed chunks); API test mocked. A live E2E pull
+  is impractical in CI (multi-GB downloads) — add one under `@pytest.mark.e2e`
+  but gate it behind an explicit opt-in env var (e.g. `RUN_MODEL_PULL_E2E=1`)
+  so the existing `pytest -m e2e` run doesn't silently start downloading
+  gigabytes.
+
+**Done when:** a model not yet installed can be pulled from the browser with
+visible progress, appears in the model picker the moment it completes and is
+immediately selectable for chat, and can be deleted again from the same UI.
+
+---
+
 ## Later enhancements (explicitly out of scope for v1)
 
-- Token streaming in the UI via SSE (the FastAPI choice keeps this cheap).
+- Token streaming of the chat reply itself in the UI via SSE (Phase 15
+  introduces the same primitive for model-pull progress first).
 - OCR + overlay for scanned/non-AcroForm PDFs (harder; form fields first).
-- Multiple concurrent conversations / persisted history across sessions.
 - Sandboxed execution for code skills (only if skills ever come from anywhere
   other than the local user).

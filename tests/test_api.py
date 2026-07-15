@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import config
+import conversations
 import ollama_client
 import server
 import skills
@@ -14,8 +15,9 @@ import vectorstore
 
 
 @pytest.fixture
-def client(monkeypatch):
-    monkeypatch.setattr(server, "_conversation", None)
+def client(tmp_path, monkeypatch):
+    monkeypatch.setattr(conversations, "CONVERSATIONS_DIR", tmp_path / "conversations")
+    monkeypatch.setattr(server, "_active_conversation_id", None)
     monkeypatch.setattr(server, "_selected_model", None)
     return TestClient(server.app)
 
@@ -74,14 +76,85 @@ def test_conversation_reflects_history(client, monkeypatch):
     assert roles == ["system", "user", "assistant"]
 
 
-def test_reset_clears_conversation(client, monkeypatch):
+def test_new_conversation_starts_fresh_but_keeps_history(client, monkeypatch):
     monkeypatch.setattr(ollama_client, "health_check", lambda: True)
     monkeypatch.setattr(ollama_client, "chat", _mock_chat_reply("ack"))
 
     client.post("/api/chat", json={"message": "hi"})
-    client.post("/api/conversation/reset")
+    old_id = client.get("/api/conversations").json()[0]["id"]
+
+    resp = client.post("/api/conversations")
+    assert resp.status_code == 200
+    new_id = resp.json()["id"]
+    assert new_id != old_id
+
     roles = [m["role"] for m in client.get("/api/conversation").json()]
     assert roles == ["system"]
+
+    ids = {m["id"] for m in client.get("/api/conversations").json()}
+    assert ids == {old_id, new_id}  # old conversation preserved, not wiped
+
+
+def test_activate_conversation_switches_active(client, monkeypatch):
+    monkeypatch.setattr(ollama_client, "health_check", lambda: True)
+    monkeypatch.setattr(ollama_client, "chat", _mock_chat_reply("ack"))
+
+    client.post("/api/chat", json={"message": "first"})
+    first_id = client.get("/api/conversations").json()[0]["id"]
+    client.post("/api/conversations")  # switches active to a new empty one
+
+    resp = client.post(f"/api/conversations/{first_id}/activate")
+    assert resp.status_code == 200
+
+    messages = client.get("/api/conversation").json()
+    assert any(m.get("content") == "first" for m in messages)
+
+
+def test_active_conversation_reflects_current(client, monkeypatch):
+    monkeypatch.setattr(ollama_client, "health_check", lambda: True)
+    monkeypatch.setattr(ollama_client, "chat", _mock_chat_reply("ack"))
+
+    client.post("/api/chat", json={"message": "hi"})
+    active = client.get("/api/conversations/active").json()
+
+    new_meta = client.post("/api/conversations").json()
+    assert new_meta["id"] != active["id"]
+    assert client.get("/api/conversations/active").json()["id"] == new_meta["id"]
+
+
+def test_activate_missing_conversation_404s(client):
+    resp = client.post("/api/conversations/does-not-exist/activate")
+    assert resp.status_code == 404
+
+
+def test_delete_conversation_removes_from_history(client, monkeypatch):
+    monkeypatch.setattr(ollama_client, "health_check", lambda: True)
+    monkeypatch.setattr(ollama_client, "chat", _mock_chat_reply("ack"))
+
+    client.post("/api/chat", json={"message": "hi"})
+    conversation_id = client.get("/api/conversations").json()[0]["id"]
+
+    resp = client.delete(f"/api/conversations/{conversation_id}")
+    assert resp.status_code == 200
+    assert client.get("/api/conversations").json() == []
+
+
+def test_delete_missing_conversation_404s(client):
+    resp = client.delete("/api/conversations/does-not-exist")
+    assert resp.status_code == 404
+
+
+def test_deleting_active_conversation_falls_back(client, monkeypatch):
+    monkeypatch.setattr(ollama_client, "health_check", lambda: True)
+    monkeypatch.setattr(ollama_client, "chat", _mock_chat_reply("ack"))
+
+    client.post("/api/chat", json={"message": "hi"})
+    active_id = client.get("/api/conversations").json()[0]["id"]
+
+    client.delete(f"/api/conversations/{active_id}")
+    # Chatting again must not 500 — a fresh active conversation gets created.
+    resp = client.post("/api/chat", json={"message": "hi again"})
+    assert resp.status_code == 200
 
 
 def test_upload_ingests_and_lists_document(client, tmp_path, monkeypatch, text_pdf):
@@ -109,6 +182,47 @@ def test_upload_ingests_and_lists_document(client, tmp_path, monkeypatch, text_p
 def test_upload_rejects_non_file_body(client):
     resp = client.post("/api/upload", data={"file": "not-a-file"})
     assert resp.status_code == 422
+
+
+def test_delete_document_removes_file_and_index(
+    client, tmp_path, monkeypatch, text_pdf
+):
+    upload_dir = tmp_path / "uploads"
+    monkeypatch.setattr(config, "get_upload_dir", lambda: upload_dir)
+    monkeypatch.setattr(config, "get_chroma_path", lambda: tmp_path / "chroma")
+    vectorstore._client = None
+    monkeypatch.setattr(ollama_client, "embed", lambda text, model=None: [0.0] * 8)
+
+    client.post(
+        "/api/upload",
+        files={"file": ("resume.pdf", text_pdf.read_bytes(), "application/pdf")},
+    )
+
+    resp = client.delete("/api/documents/resume.pdf")
+    assert resp.status_code == 200
+    assert client.get("/api/documents").json() == []
+    assert not (upload_dir / "resume.pdf").exists()
+
+    vectorstore._client = None
+
+
+def test_delete_missing_document_404s(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "get_upload_dir", lambda: tmp_path / "uploads")
+    resp = client.delete("/api/documents/does-not-exist.pdf")
+    assert resp.status_code == 404
+
+
+def test_delete_document_rejects_path_traversal(client, tmp_path, monkeypatch):
+    """A literal '..' segment has no `.name` component (Path('..').name == ''),
+    which the endpoint's safe_name != filename check must reject. Percent-
+    encode the dots (%2e) so httpx's own URL normalization doesn't collapse
+    the segment client-side before the request is even sent — a literal
+    '..' or '/' never reaches the server at all, since normalization and
+    routing strip it first, but defense-in-depth here still matters in case
+    a client or proxy ever forwards one through unnormalized."""
+    monkeypatch.setattr(config, "get_upload_dir", lambda: tmp_path / "uploads")
+    resp = client.delete("/api/documents/%2e%2e")
+    assert resp.status_code == 400
 
 
 def test_list_models_reports_tool_capability(client, monkeypatch):
@@ -166,6 +280,45 @@ def test_set_model_rejects_non_tool_capable_model(client, monkeypatch):
     monkeypatch.setattr(ollama_client, "list_models", lambda: _FAKE_MODELS)
     resp = client.post("/api/settings/model", json={"model": "nomic-embed-text:latest"})
     assert resp.status_code == 400
+
+
+def test_model_library_lists_curated_models(client):
+    resp = client.get("/api/models/library")
+    assert resp.status_code == 200
+    names = {m["name"] for m in resp.json()}
+    assert "qwen2.5" in names
+    assert all("tool_capable" in m for m in resp.json())
+
+
+def test_pull_model_streams_progress(client, monkeypatch):
+    def fake_pull(name):
+        yield {"status": "pulling manifest"}
+        yield {"status": "success"}
+
+    monkeypatch.setattr(ollama_client, "pull_model", fake_pull)
+    resp = client.post("/api/models/pull", json={"name": "qwen2.5"})
+    assert resp.status_code == 200
+    assert "pulling manifest" in resp.text
+    assert "success" in resp.text
+
+
+def test_delete_model_endpoint(client, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        ollama_client, "delete_model", lambda name: captured.setdefault("name", name)
+    )
+    resp = client.delete("/api/models/qwen2.5")
+    assert resp.status_code == 200
+    assert captured["name"] == "qwen2.5"
+
+
+def test_delete_model_404s_on_failure(client, monkeypatch):
+    def fake_delete(name):
+        raise ValueError("not found")
+
+    monkeypatch.setattr(ollama_client, "delete_model", fake_delete)
+    resp = client.delete("/api/models/does-not-exist")
+    assert resp.status_code == 404
 
 
 @pytest.fixture

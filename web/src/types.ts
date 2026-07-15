@@ -59,3 +59,23 @@ export type SkillWriteRequest = {
   prompt?: string
   code?: string
 }
+
+export type ConversationMeta = {
+  id: string
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+export type ModelLibraryEntry = {
+  name: string
+  description: string
+  tool_capable: boolean
+}
+
+export type PullProgress = {
+  status?: string
+  completed?: number
+  total?: number
+  error?: string
+}

@@ -33,6 +33,13 @@ def add(ids, embeddings, documents, metadatas) -> None:
     )
 
 
+def delete_by_source(source: str) -> None:
+    """Remove every chunk stored under `source` (a filename). Used when a
+    document is un-attached — must run alongside deleting the uploaded file
+    itself, or search_documents keeps finding content for a file that's gone."""
+    get_collection().delete(where={"source": source})
+
+
 def query(embedding, n_results: int = 4) -> list[dict]:
     """Nearest chunks to `embedding`.
 

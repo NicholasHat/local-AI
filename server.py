@@ -4,22 +4,28 @@ React app (`uvicorn server:app`, browse to it directly).
 
 Wraps agent/memory/ingest/vectorstore UNCHANGED — they stay the source of
 truth (CLAUDE.md: tool dispatch lives in agent.py, history lives in
-memory.py). This module owns exactly one thing beyond routing: the single
-server-side Conversation — one active conversation, no per-session state.
+memory.py). This module owns routing plus one thing beyond it: which
+conversation is currently active among the ones persisted by
+conversations.py (Phase 14) — there's one active conversation at a time,
+but many can exist in history.
 """
 
+import json
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import agent
 import config
+import conversations
 import ingest
 import ollama_client
 import skills
+import vectorstore
 from memory import Conversation
 
 app = FastAPI(title="Local AI Assistant API")
@@ -31,15 +37,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_conversation: Conversation | None = None
+_active_conversation_id: str | None = None
 _selected_model: str | None = None  # None = use config.get_model()'s default
 
 
+def _active_id() -> str:
+    """The active conversation's id, creating one on first use."""
+    global _active_conversation_id
+    if _active_conversation_id is None:
+        _active_conversation_id, _ = conversations.create(
+            system_prompt=agent.SYSTEM_PROMPT
+        )
+    return _active_conversation_id
+
+
 def _get_conversation() -> Conversation:
-    global _conversation
-    if _conversation is None:
-        _conversation = Conversation(system_prompt=agent.SYSTEM_PROMPT)
-    return _conversation
+    return conversations.load(_active_id())
 
 
 def _active_model() -> str | None:
@@ -140,15 +153,147 @@ def set_model(request: SetModelRequest) -> ModelsResponse:
     return ModelsResponse(models=infos, current=_selected_model)
 
 
+# A small curated list of recommended tags — Ollama has no public model
+# search API, so this is hand-maintained, not a live catalog. Any tag can
+# still be pulled directly via POST /api/models/pull regardless of this list.
+_MODEL_LIBRARY = [
+    {
+        "name": "qwen2.5",
+        "description": "Strong tool-calling, good general default.",
+        "tool_capable": True,
+    },
+    {
+        "name": "llama3.1",
+        "description": "Meta's Llama 3.1 — tool-calling capable, widely used.",
+        "tool_capable": True,
+    },
+    {
+        "name": "mistral",
+        "description": "Fast 7B model, tool-calling capable.",
+        "tool_capable": True,
+    },
+    {
+        "name": "gemma2",
+        "description": "Google's Gemma 2 — strong general-purpose, no tool-calling.",
+        "tool_capable": False,
+    },
+    {
+        "name": "phi3",
+        "description": "Small and fast, no tool-calling.",
+        "tool_capable": False,
+    },
+    {
+        "name": "nomic-embed-text",
+        "description": "Embedding model used for this app's document search.",
+        "tool_capable": False,
+    },
+]
+
+
+class ModelLibraryEntry(BaseModel):
+    name: str
+    description: str
+    tool_capable: bool
+
+
+class PullModelRequest(BaseModel):
+    name: str
+
+
+@app.get("/api/models/library", response_model=list[ModelLibraryEntry])
+def model_library() -> list[ModelLibraryEntry]:
+    return [ModelLibraryEntry(**m) for m in _MODEL_LIBRARY]
+
+
+@app.post("/api/models/pull")
+def pull_model(request: PullModelRequest) -> StreamingResponse:
+    """SSE stream of pull progress — this app's first streaming route (the
+    same primitive earmarked for token-streamed chat replies later)."""
+
+    def event_stream():
+        for update in ollama_client.pull_model(request.name):
+            yield f"data: {json.dumps(update)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.delete("/api/models/{name}")
+def delete_model_endpoint(name: str) -> dict:
+    try:
+        ollama_client.delete_model(name)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"status": "ok"}
+
+
 @app.get("/api/conversation")
 def get_conversation() -> list[dict]:
     return _get_conversation().messages
 
 
-@app.post("/api/conversation/reset")
-def reset_conversation() -> dict:
-    global _conversation
-    _conversation = Conversation(system_prompt=agent.SYSTEM_PROMPT)
+class ConversationMetaResponse(BaseModel):
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+
+
+def _meta_response(meta: conversations.ConversationMeta) -> ConversationMetaResponse:
+    return ConversationMetaResponse(
+        id=meta.id,
+        title=meta.title,
+        created_at=meta.created_at,
+        updated_at=meta.updated_at,
+    )
+
+
+@app.get("/api/conversations", response_model=list[ConversationMetaResponse])
+def list_conversations() -> list[ConversationMetaResponse]:
+    """The short history list, newest first — including the active one."""
+    return [_meta_response(m) for m in conversations.list_recent()]
+
+
+@app.get("/api/conversations/active", response_model=ConversationMetaResponse)
+def get_active_conversation() -> ConversationMetaResponse:
+    """Which conversation the sidebar's history list should highlight."""
+    return _meta_response(conversations.get_meta(_active_id()))
+
+
+@app.post("/api/conversations", response_model=ConversationMetaResponse)
+def new_conversation() -> ConversationMetaResponse:
+    """Start a new chat. Unlike the old reset endpoint, the previous
+    conversation is kept in history, not overwritten."""
+    global _active_conversation_id
+    _active_conversation_id, _ = conversations.create(system_prompt=agent.SYSTEM_PROMPT)
+    return _meta_response(conversations.get_meta(_active_conversation_id))
+
+
+@app.post(
+    "/api/conversations/{conversation_id}/activate",
+    response_model=ConversationMetaResponse,
+)
+def activate_conversation(conversation_id: str) -> ConversationMetaResponse:
+    global _active_conversation_id
+    meta = conversations.get_meta(conversation_id)
+    if meta is None:
+        raise HTTPException(
+            status_code=404, detail=f"No such conversation: {conversation_id!r}"
+        )
+    _active_conversation_id = conversation_id
+    return _meta_response(meta)
+
+
+@app.delete("/api/conversations/{conversation_id}")
+def delete_conversation(conversation_id: str) -> dict:
+    global _active_conversation_id
+    try:
+        conversations.delete(conversation_id)
+    except conversations.ConversationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if _active_conversation_id == conversation_id:
+        remaining = conversations.list_recent(limit=1)
+        _active_conversation_id = remaining[0].id if remaining else None
     return {"status": "ok"}
 
 
@@ -161,7 +306,10 @@ def chat(request: ChatRequest) -> ChatResponse:
     if not ollama_client.health_check():
         raise HTTPException(status_code=503, detail="Ollama is not reachable.")
 
-    reply = agent.run(request.message, _get_conversation(), model=_selected_model)
+    conversation_id = _active_id()
+    conversation = conversations.load(conversation_id)
+    reply = agent.run(request.message, conversation, model=_selected_model)
+    conversations.save(conversation_id, conversation)
     return ChatResponse(reply=reply)
 
 
@@ -178,12 +326,15 @@ async def upload(file: UploadFile) -> UploadResponse:
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Failed to index: {exc}") from exc
 
-    _get_conversation().add_system_note(
+    conversation_id = _active_id()
+    conversation = conversations.load(conversation_id)
+    conversation.add_system_note(
         f"The user uploaded a document named '{safe_name}'. Read its full "
         f"text with read_uploaded_document(filename='{safe_name}'), or answer "
         "specific questions about it with search_documents. Do not ask the "
         "user for a file path."
     )
+    conversations.save(conversation_id, conversation)
     return UploadResponse(filename=safe_name, chunks=chunks)
 
 
@@ -200,6 +351,24 @@ def list_documents() -> list[DocumentInfo]:
         ),
         key=lambda d: d.filename,
     )
+
+
+@app.delete("/api/documents/{filename}")
+def delete_document(filename: str) -> dict:
+    """Path-traversal-safe via resolved-path containment, not a `.name`
+    comparison — `Path("..").name` is `".."` (unchanged), so a bare ".."
+    would slip past a naive equality check; resolving and checking the
+    parent directory catches it regardless of the filename's shape."""
+    upload_dir = config.get_upload_dir()
+    path = (upload_dir / filename).resolve()
+    if path.parent != upload_dir.resolve():
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"No such document: {filename!r}")
+
+    path.unlink()
+    vectorstore.delete_by_source(path.name)
+    return {"status": "ok"}
 
 
 class SkillInfo(BaseModel):

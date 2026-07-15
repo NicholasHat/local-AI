@@ -2,14 +2,17 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from './api'
 import { ActivityLog } from './components/ActivityLog'
 import { Composer } from './components/Composer'
+import { ModelManager } from './components/ModelManager'
 import { Sidebar } from './components/Sidebar'
 import type { View } from './components/Sidebar'
 import { SkillsPage } from './components/SkillsPage'
 import { Transcript } from './components/Transcript'
 import type {
   ConversationMessage,
+  ConversationMeta,
   DocumentInfo,
   HealthResponse,
+  ModelLibraryEntry,
   ModelsResponse,
   SkillInfo,
   SkillWriteRequest,
@@ -29,7 +32,10 @@ function App() {
   const [messages, setMessages] = useState<ConversationMessage[]>([])
   const [documents, setDocuments] = useState<DocumentInfo[]>([])
   const [modelsInfo, setModelsInfo] = useState<ModelsResponse>(EMPTY_MODELS)
+  const [modelLibrary, setModelLibrary] = useState<ModelLibraryEntry[]>([])
   const [skills, setSkills] = useState<SkillInfo[]>([])
+  const [conversations, setConversations] = useState<ConversationMeta[]>([])
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
 
   const [pendingMessage, setPendingMessage] = useState<string | null>(null)
   const [thinking, setThinking] = useState(false)
@@ -40,17 +46,30 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [view, setView] = useState<View>('chat')
   const [activityLogOpen, setActivityLogOpen] = useState(false)
+  const [modelManagerOpen, setModelManagerOpen] = useState(false)
 
   const refreshHealth = useCallback(async () => setHealth(await api.health()), [])
   const refreshConversation = useCallback(
     async () => setMessages(await api.getConversation()),
     [],
   )
+  const refreshConversationList = useCallback(
+    async () => setConversations(await api.conversations()),
+    [],
+  )
+  const refreshActiveConversationId = useCallback(async () => {
+    const meta = await api.activeConversation()
+    setActiveConversationId(meta.id)
+  }, [])
   const refreshDocuments = useCallback(
     async () => setDocuments(await api.documents()),
     [],
   )
   const refreshModels = useCallback(async () => setModelsInfo(await api.models()), [])
+  const refreshModelLibrary = useCallback(
+    async () => setModelLibrary(await api.modelLibrary()),
+    [],
+  )
   const refreshSkills = useCallback(async () => setSkills(await api.skills()), [])
 
   const load = useCallback(async () => {
@@ -62,14 +81,28 @@ function App() {
         refreshConversation(),
         refreshDocuments(),
         refreshModels(),
+        refreshModelLibrary(),
         refreshSkills(),
       ])
+      // Sequential: the active conversation is only guaranteed to exist
+      // once refreshConversation() above has hit the backend at least once.
+      await refreshConversationList()
+      await refreshActiveConversationId()
     } catch (e) {
       setInitError(errorMessage(e))
     } finally {
       setInitializing(false)
     }
-  }, [refreshHealth, refreshConversation, refreshDocuments, refreshModels, refreshSkills])
+  }, [
+    refreshHealth,
+    refreshConversation,
+    refreshDocuments,
+    refreshModels,
+    refreshModelLibrary,
+    refreshSkills,
+    refreshConversationList,
+    refreshActiveConversationId,
+  ])
 
   useEffect(() => {
     load()
@@ -86,7 +119,12 @@ function App() {
     } finally {
       setPendingMessage(null)
       setThinking(false)
-      await Promise.allSettled([refreshConversation(), refreshHealth(), refreshSkills()])
+      await Promise.allSettled([
+        refreshConversation(),
+        refreshHealth(),
+        refreshSkills(),
+        refreshConversationList(),
+      ])
     }
   }
 
@@ -103,11 +141,47 @@ function App() {
     }
   }
 
+  async function handleDeleteDocument(filename: string) {
+    setError(null)
+    try {
+      await api.deleteDocument(filename)
+      await refreshDocuments()
+    } catch (e) {
+      setError(errorMessage(e))
+    }
+  }
+
   async function handleNewChat() {
     setError(null)
     try {
-      await api.resetConversation()
+      const meta = await api.newConversation()
+      setActiveConversationId(meta.id)
+      await Promise.all([refreshConversation(), refreshConversationList()])
+    } catch (e) {
+      setError(errorMessage(e))
+    }
+  }
+
+  async function handleSelectConversation(id: string) {
+    setError(null)
+    try {
+      await api.activateConversation(id)
+      setActiveConversationId(id)
       await refreshConversation()
+    } catch (e) {
+      setError(errorMessage(e))
+    }
+  }
+
+  async function handleDeleteConversation(id: string) {
+    setError(null)
+    try {
+      await api.deleteConversation(id)
+      await Promise.all([
+        refreshConversationList(),
+        refreshActiveConversationId(),
+        refreshConversation(),
+      ])
     } catch (e) {
       setError(errorMessage(e))
     }
@@ -200,8 +274,13 @@ function App() {
         documents={documents}
         uploading={uploading}
         onUpload={handleUpload}
+        onDeleteDocument={handleDeleteDocument}
         onNewChat={handleNewChat}
         onRecheckHealth={refreshHealth}
+        conversations={conversations}
+        activeConversationId={activeConversationId}
+        onSelectConversation={handleSelectConversation}
+        onDeleteConversation={handleDeleteConversation}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -216,13 +295,22 @@ function App() {
           <span className="font-medium text-neutral-800 md:hidden">
             Local AI Assistant
           </span>
-          <button
-            type="button"
-            onClick={() => setActivityLogOpen(true)}
-            className="ml-auto flex items-center gap-1.5 rounded-full border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:border-denim-400 hover:text-denim-700"
-          >
-            <span aria-hidden>🗒️</span> Activity log
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setModelManagerOpen((v) => !v)}
+              className="flex items-center gap-1.5 rounded-full border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:border-denim-400 hover:text-denim-700"
+            >
+              <span aria-hidden>🧠</span> Models
+            </button>
+            <button
+              type="button"
+              onClick={() => setActivityLogOpen(true)}
+              className="flex items-center gap-1.5 rounded-full border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:border-denim-400 hover:text-denim-700"
+            >
+              <span aria-hidden>🗒️</span> Activity log
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -273,6 +361,16 @@ function App() {
         onClose={() => setActivityLogOpen(false)}
         messages={messages}
         thinking={thinking}
+      />
+
+      <ModelManager
+        open={modelManagerOpen}
+        onClose={() => setModelManagerOpen(false)}
+        installed={modelsInfo.models}
+        library={modelLibrary}
+        onChanged={async () => {
+          await Promise.all([refreshModels(), refreshHealth()])
+        }}
       />
     </div>
   )

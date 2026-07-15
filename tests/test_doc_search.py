@@ -50,3 +50,15 @@ def test_doc_search_formats_hits(ephemeral_collection, monkeypatch):
 def test_doc_search_empty_collection(ephemeral_collection, monkeypatch):
     monkeypatch.setattr(ollama_client, "embed", lambda text: [1.0, 0.0])
     assert "No matching documents" in doc_search.search("anything")
+
+
+def test_delete_by_source_removes_only_that_sources_chunks(ephemeral_collection):
+    ephemeral_collection.add(
+        ids=["a::0", "b::0"],
+        embeddings=[[1.0, 0.0], [0.0, 1.0]],
+        documents=["apple", "banana"],
+        metadatas=[{"source": "a"}, {"source": "b"}],
+    )
+    vectorstore.delete_by_source("a")
+    remaining = ephemeral_collection.get()
+    assert remaining["metadatas"] == [{"source": "b"}]

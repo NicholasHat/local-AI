@@ -73,6 +73,20 @@ def list_models() -> list[dict]:
     return models
 
 
+def pull_model(name: str):
+    """Stream progress for `ollama pull <name>`. Yields plain dicts (typically
+    `status`, and `completed`/`total` once a layer starts downloading) —
+    passthrough only, no retry/business logic, same as the rest of this
+    module."""
+    for update in _get_client().pull(model=name, stream=True):
+        yield _as_dict(update)
+
+
+def delete_model(name: str) -> None:
+    """Remove a locally pulled model."""
+    _get_client().delete(model=name)
+
+
 def health_check() -> bool:
     """Return True if Ollama is reachable. Used by the UI at startup."""
     try:
