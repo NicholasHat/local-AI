@@ -2,16 +2,17 @@
 
 ![status](https://img.shields.io/badge/status-actively%20developing-brightgreen)
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
-![tests](https://img.shields.io/badge/tests-96%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-123%20passing-brightgreen)
 
 A locally-run AI assistant (via [Ollama](https://ollama.com)) that can chat,
 search your documents (RAG), read & fill PDF forms, and grow its own skills —
 with **no data ever leaving your machine**. No cloud APIs, no API keys, fully
 private.
 
-> **Status:** chat, agent loop, RAG, PDF tools, model selection, and a
-> file-based skills system are all working and tested, behind a React
-> frontend backed by a FastAPI API. See the [roadmap](#roadmap) for what's next.
+> **Status:** chat, agent loop, RAG, PDF tools, model management, persisted
+> chat history, and a file-based skills system are all working and tested,
+> behind a React frontend backed by a FastAPI API. See the
+> [roadmap](#roadmap) for what's next.
 
 Built from scratch to understand how modern AI agents actually work under the
 hood: the tool-calling loop, retrieval-augmented generation, and function
@@ -30,8 +31,14 @@ local open-source models.
 - 🧩 **Grows its own skills** — reusable capabilities defined as files
   (`skills/<name>/`), editable from the browser, and the model can even write
   new instruction-based skills for itself on request
-- 🔀 **Switches models** — pick any installed, tool-capable Ollama model from
-  the sidebar, mid-conversation
+- 🔀 **Manages models** — switch between any installed, tool-capable Ollama
+  model mid-conversation, or pull new ones straight from the browser with
+  live progress (and remove them again) — no terminal required
+- 🕘 **Remembers past chats** — every conversation is persisted and listed in
+  a short history you can revisit or delete, not lost the moment you start a
+  new one
+- 🗑️ **Un-attaches documents** — remove an uploaded file and its indexed
+  chunks together, from the same sidebar you uploaded it in
 
 ## How it works
 
@@ -39,7 +46,7 @@ local open-source models.
         React UI (web/)
              │  HTTP (/api/*)
         ┌────▼─────┐
-        │ FastAPI  │   server.py — conversation, model choice
+        │ FastAPI  │   server.py — routing, active conversation, model choice
         │ server   │
         └────┬─────┘
              │
@@ -74,6 +81,7 @@ required.
 | PDF | pdfplumber (read) · pypdf (fill AcroForm fields) |
 | Vector store | ChromaDB |
 | Skills | file-based (`skill.yaml` + `prompt.md` or `run.py`), no sandbox — see [`skills/README.md`](skills/README.md) |
+| Conversation history | file-based (`conversations/<id>.json`), same pattern as skills — no database |
 | Tests / lint | pytest (unit + live e2e) · ruff · oxlint |
 
 ## Quickstart
@@ -129,7 +137,7 @@ A few decisions I made deliberately, and why:
 ## Tests
 
 ```bash
-pytest tests/ -v      # 96 tests, no live model required
+pytest tests/ -v      # 123 tests, no live model required
 pytest -m e2e -v       # live-model tests; skips cleanly if Ollama isn't running
 ruff check .
 cd web && npm run build && npm run lint
@@ -137,9 +145,10 @@ cd web && npm run build && npm run lint
 
 The unit suite covers the agent loop (including the runaway-loop guard), PDF
 read/fill (including the trap where pypdf silently "succeeds" on non-form
-PDFs), the ingest → search retrieval path, the skills registry, and the
-FastAPI contract — all mocked, no Ollama required. The e2e suite drives the
-same tools, the API, model switching, and the skills system (including
+PDFs), the ingest → search retrieval path, the skills registry, the
+conversation registry (persistence, title derivation), and the FastAPI
+contract — all mocked, no Ollama required. The e2e suite drives the same
+tools, the API, model switching, and the skills system (including
 self-authoring) against a real running model.
 
 ## Roadmap
@@ -149,10 +158,14 @@ self-authoring) against a real running model.
 - [x] Chat with a local LLM via Ollama
 - [x] Tool-calling agent loop with a runaway guard
 - [x] PDF reading + AcroForm filling
-- [x] Document RAG (ingest → embed → semantic search)
-- [x] React web UI with document upload, tool-event display, and a model
-      picker
-- [x] Runtime model selection across installed, tool-capable Ollama models
+- [x] Document RAG (ingest → embed → semantic search), with the ability to
+      un-attach a document (deletes the file and its indexed chunks)
+- [x] React web UI with document upload, a tool-activity log, and inline
+      model selection
+- [x] Runtime model selection across installed, tool-capable Ollama models,
+      plus pulling and removing models from the browser (with live progress)
+- [x] Persisted, multi-conversation history — switch between past chats or
+      start a new one without losing the last
 - [x] File-based skills system, including browser-based authoring and
       model self-authoring of instruction skills
 
@@ -162,4 +175,3 @@ self-authoring) against a real running model.
 - [ ] More advanced tools — web search, code execution, spreadsheet/CSV
       analysis, calendar & email drafting
 - [ ] OCR for scanned (non-interactive) PDFs
-- [ ] Persistent, multi-conversation history
