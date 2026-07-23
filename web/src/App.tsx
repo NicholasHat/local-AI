@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from './api'
 import { ActivityLog } from './components/ActivityLog'
+import { CodingPage } from './components/CodingPage'
 import { Composer } from './components/Composer'
 import { ModelManager } from './components/ModelManager'
 import { Sidebar } from './components/Sidebar'
@@ -345,7 +346,7 @@ function App() {
               onSelectModel={handleSelectModel}
             />
           </>
-        ) : (
+        ) : view === 'skills' ? (
           <SkillsPage
             skills={skills}
             busy={skillsBusy}
@@ -353,6 +354,8 @@ function App() {
             onUpdate={handleUpdateSkill}
             onDelete={handleDeleteSkill}
           />
+        ) : (
+          <CodingPage models={modelsInfo.models} currentModel={modelsInfo.current} />
         )}
       </div>
 

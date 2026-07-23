@@ -79,3 +79,52 @@ export type PullProgress = {
   total?: number
   error?: string
 }
+
+// Coding agent (Phase 16 backend / Phase 17 frontend). Steps are the loosely
+// typed dicts coding_agent.py appends to runs/<id>.json — modeled here for
+// the known fields (see coding_agent.py's _run()) with extras allowed so an
+// unrecognized field never breaks rendering.
+export type CodingStepType = 'assistant' | 'tool_call' | 'stopped' | 'error'
+
+export type CodingStep = {
+  type: CodingStepType
+  model?: string
+  ts?: string
+  content?: string | null
+  tool_calls?: ToolCall[] | null
+  tool?: string
+  args?: Record<string, unknown>
+  result?: string
+  [key: string]: unknown
+}
+
+// The extra line server.py's /events route synthesizes once the run leaves
+// `running` — not part of the persisted step log, only the SSE wire shape.
+export type CodingStatusEvent = {
+  type: 'status'
+  status: string
+}
+
+export type CodingEvent = CodingStep | CodingStatusEvent
+
+export type CodingRun = {
+  id: string
+  repo_path: string
+  instruction: string
+  model: string
+  status: string
+  created_at: string
+  updated_at: string
+  base_commit: string
+}
+
+export type CodingRunDetail = CodingRun & {
+  steps: CodingStep[]
+  diff: string
+}
+
+export type StartCodingRunRequest = {
+  repo_path: string
+  instruction: string
+  model?: string
+}

@@ -4,6 +4,9 @@
 
 import type {
   ChatResponse,
+  CodingEvent,
+  CodingRun,
+  CodingRunDetail,
   ConversationMessage,
   ConversationMeta,
   DocumentInfo,
@@ -13,6 +16,7 @@ import type {
   PullProgress,
   SkillInfo,
   SkillWriteRequest,
+  StartCodingRunRequest,
   UploadResponse,
 } from './types'
 
@@ -59,6 +63,34 @@ async function pullModel(
       if (!line.startsWith('data:')) continue
       const payload = line.slice('data:'.length).trim()
       if (payload) onProgress(JSON.parse(payload) as PullProgress)
+    }
+  }
+}
+
+async function codingRunEvents(
+  runId: string,
+  onEvent: (event: CodingEvent) => void,
+): Promise<void> {
+  const response = await fetch(`${BASE}/coding/runs/${encodeURIComponent(runId)}/events`)
+  if (!response.ok || !response.body) {
+    const detail = await response.text()
+    throw new Error(`/coding/runs/${runId}/events failed (${response.status}): ${detail}`)
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const events = buffer.split('\n\n')
+    buffer = events.pop() ?? ''
+    for (const event of events) {
+      const line = event.trim()
+      if (!line.startsWith('data:')) continue
+      const payload = line.slice('data:'.length).trim()
+      if (payload) onEvent(JSON.parse(payload) as CodingEvent)
     }
   }
 }
@@ -131,4 +163,24 @@ export const api = {
     request<{ status: string }>(`/skills/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     }),
+
+  codingRuns: () => request<CodingRun[]>('/coding/runs'),
+
+  codingRun: (id: string) =>
+    request<CodingRunDetail>(`/coding/runs/${encodeURIComponent(id)}`),
+
+  startCodingRun: (payload: StartCodingRunRequest) =>
+    request<CodingRun>('/coding/runs', json(payload)),
+
+  applyCodingRun: (id: string) =>
+    request<CodingRun>(`/coding/runs/${encodeURIComponent(id)}/apply`, {
+      method: 'POST',
+    }),
+
+  discardCodingRun: (id: string) =>
+    request<CodingRun>(`/coding/runs/${encodeURIComponent(id)}/discard`, {
+      method: 'POST',
+    }),
+
+  codingRunEvents,
 }
