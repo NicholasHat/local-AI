@@ -11,6 +11,7 @@ but many can exist in history.
 """
 
 import json
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile
@@ -20,12 +21,15 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import agent
+import coding_agent
 import config
 import conversations
 import ingest
 import ollama_client
+import runs
 import skills
 import vectorstore
+import worktree
 from memory import Conversation
 
 app = FastAPI(title="Local AI Assistant API")
@@ -444,6 +448,136 @@ def delete_skill_endpoint(name: str) -> dict:
     except skills.SkillError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"status": "ok"}
+
+
+class CodingRunRequest(BaseModel):
+    repo_path: str
+    instruction: str
+    model: str | None = None
+
+
+class CodingRunResponse(BaseModel):
+    id: str
+    repo_path: str
+    instruction: str
+    model: str
+    status: str
+    created_at: str
+    updated_at: str
+    base_commit: str
+
+
+class CodingRunDetail(CodingRunResponse):
+    steps: list[dict]
+    diff: str
+
+
+def _coding_run_response(meta: runs.RunMeta) -> CodingRunResponse:
+    return CodingRunResponse(
+        id=meta.id,
+        repo_path=meta.repo_path,
+        instruction=meta.instruction,
+        model=meta.model,
+        status=meta.status,
+        created_at=meta.created_at,
+        updated_at=meta.updated_at,
+        base_commit=meta.base_commit,
+    )
+
+
+def _coding_run_diff(meta: runs.RunMeta) -> str:
+    """The diff is only meaningful once the worktree has something to show
+    and hasn't been torn down yet — a run still `running`, or a `discarded`
+    one whose worktree is gone, just gets an empty diff rather than an
+    error. `failed` is included: its worktree is deliberately left in place
+    (see coding_agent._run's except block) so a human can see what partial
+    edits led to the failure, same reasoning as why it's discardable."""
+    if meta.status not in {"awaiting_approval", "applied", "failed"}:
+        return ""
+    try:
+        return worktree.diff(meta.id, meta.base_commit)
+    except worktree.WorktreeError:
+        return ""
+
+
+@app.post("/api/coding/runs", response_model=CodingRunResponse)
+def create_coding_run(request: CodingRunRequest) -> CodingRunResponse:
+    """Kicks off the coding agent loop on a background thread and returns
+    immediately with the new run's id — see coding_agent.start(). There is
+    deliberately no equivalent tool in agent.py's chat loop (plan.md Phase 16
+    decision 4): a coding run is only ever started by this explicit,
+    human-initiated call, never by the chat model."""
+    try:
+        meta = coding_agent.start(request.repo_path, request.instruction, request.model)
+    except (ValueError, worktree.WorktreeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _coding_run_response(meta)
+
+
+@app.get("/api/coding/runs", response_model=list[CodingRunResponse])
+def list_coding_runs() -> list[CodingRunResponse]:
+    return [_coding_run_response(m) for m in runs.list_recent()]
+
+
+@app.get("/api/coding/runs/{run_id}", response_model=CodingRunDetail)
+def get_coding_run(run_id: str) -> CodingRunDetail:
+    try:
+        meta = runs.load(run_id)
+    except runs.RunError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return CodingRunDetail(
+        **_coding_run_response(meta).model_dump(),
+        steps=meta.steps,
+        diff=_coding_run_diff(meta),
+    )
+
+
+@app.get("/api/coding/runs/{run_id}/events")
+def coding_run_events(run_id: str) -> StreamingResponse:
+    """SSE stream of live steps — polls the persisted run (runs.py) rather
+    than needing any in-memory pub/sub, so it works regardless of when a
+    client connects relative to the run's background thread, and reuses the
+    same StreamingResponse shape as the Phase 15 model-pull route."""
+
+    def event_stream():
+        sent = 0
+        while True:
+            try:
+                meta = runs.load(run_id)
+            except runs.RunError:
+                return
+            for step in meta.steps[sent:]:
+                yield f"data: {json.dumps(step)}\n\n"
+            sent = len(meta.steps)
+            if meta.status != "running":
+                status_event = json.dumps({"type": "status", "status": meta.status})
+                yield f"data: {status_event}\n\n"
+                return
+            time.sleep(0.3)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/api/coding/runs/{run_id}/apply", response_model=CodingRunResponse)
+def apply_coding_run(run_id: str) -> CodingRunResponse:
+    try:
+        meta = coding_agent.apply_run(run_id)
+    except runs.RunError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (ValueError, worktree.WorktreeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _coding_run_response(meta)
+
+
+@app.post("/api/coding/runs/{run_id}/discard", response_model=CodingRunResponse)
+def discard_coding_run(run_id: str) -> CodingRunResponse:
+    try:
+        meta = coding_agent.discard_run(run_id)
+    except runs.RunError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (ValueError, worktree.WorktreeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _coding_run_response(meta)
 
 
 # Serve the built React app, if present. Must be mounted LAST — Starlette

@@ -40,3 +40,20 @@ def get_chroma_path() -> Path:
 def get_upload_dir() -> Path:
     """Directory where files uploaded via the UI are saved (gitignored)."""
     return Path(os.getenv("UPLOAD_DIR", "uploads"))
+
+
+def get_coding_workspace_root() -> Path:
+    """Allowlisted root for the coding agent's target repos (Phase 16). A
+    requested repo_path must resolve to this directory or somewhere beneath
+    it — the guard that keeps a fallible model-driven run from ever being
+    pointed at '/' or some other directory the user never opted into.
+    Defaults to ~/coding-workspace; override via CODING_WORKSPACE_ROOT."""
+    root = os.getenv("CODING_WORKSPACE_ROOT", str(Path.home() / "coding-workspace"))
+    return Path(root).resolve()
+
+
+def get_coding_test_command() -> str:
+    """The command run_tests() runs inside the worktree. The model chooses
+    *when* to test, never *what* to run — this stays a fixed, configured
+    command, not an arbitrary shell tool."""
+    return os.getenv("CODING_TEST_COMMAND", "pytest -q")

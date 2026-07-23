@@ -12,8 +12,11 @@ separately phased, done as a direct UI request). The app is FastAPI + React
 multi-conversation history, document removal, and pulling additional models
 from the browser. The Streamlit UI (Phase 6) has been fully cut over and
 removed (Phase 12). See each phase's "Done when" line for what was verified.
-Next work is whatever comes after the "Later enhancements" list below, or a
-fresh ask.
+
+**Phases 16–18 below are planned (2026-07-23), not yet built** — a sandboxed
+coding agent (open a repo → plan → edit in an isolated worktree → run tests →
+reviewable diff → human approval before anything merges), and a multi-agent
+writer/tester/security-reviewer variant as a stretch on top of it.
 
 ## Guiding principle
 
@@ -514,6 +517,204 @@ half: getting new ones onto the machine from the browser.
 **Done when:** a model not yet installed can be pulled from the browser with
 visible progress, appears in the model picker the moment it completes and is
 immediately selectable for chat, and can be deleted again from the same UI.
+
+---
+
+## Key decisions for Phases 16–18 (planned 2026-07-23)
+
+The next capability is a **sandboxed coding agent**: point it at a local git
+repo, describe a change, and it plans, edits, runs the tests, and produces a
+reviewable diff — stopping for human approval before anything touches a real
+branch. Then, as a stretch, a **multi-agent** variant (writer / tester /
+security reviewer) over the same machinery. This is the first part of the app
+that lets model-driven output *execute* — so the decisions below are mostly
+about bounding that, honestly.
+
+1. **Isolation replaces prohibition.** Every other tool in this app is
+   in-process with no sandbox because the model can never run code it wrote —
+   `create_skill` structurally can't emit a `run.py` (see `skills.py`'s
+   docstring and Phase 11). A coding agent deliberately crosses that line: it
+   edits files and runs a test process. The safety property that used to be
+   "the model can't execute code" becomes "the model can only execute code
+   **inside a throwaway git worktree on a branch that never auto-merges**,
+   and nothing reaches a real branch without a human reading the diff." This
+   is not defending against a malicious *user* (still a local, single-user
+   app) — it's bounding a *fallible model* so a bad edit or a runaway test
+   can't corrupt the working tree or run unbounded. No sandboxing theater:
+   state that trust model plainly, same as the skills README does.
+
+2. **The git worktree is the sandbox, the diff, and the undo — all three.**
+   `git worktree add` off the target repo gives a cheap, disposable checkout
+   on a scratch branch. The agent works only there. `git diff` against the
+   base commit *is* the review artifact, for free. Discarding is
+   `git worktree remove` — the real branch was never touched. No custom
+   snapshotting, no manual rollback logic; git already solved this. Approving
+   applies that same diff onto the working branch (or pushes the scratch
+   branch), then removes the worktree.
+
+3. **A separate sibling agent with its own confined dispatch — not new chat
+   tools.** The coding agent is its own bounded loop (`coding_agent.py`,
+   mirroring `agent.py`'s shape) with its own `_execute_coding_tool()` and a
+   *different, smaller* tool schema (read/list/write within the worktree, run
+   the configured test command). It is **deliberately not** merged into
+   `agent.py`'s `_execute_tool()`. CLAUDE.md's "tool dispatch lives in
+   agent.py only" rule is about the *chat* agent; keeping the code-executing
+   tools behind a second loop means the general chat model — which reads
+   untrusted documents and search results — literally cannot reach them.
+   That's a stronger boundary than a shared dispatch with a guard.
+
+4. **Human-initiated only, never a chat tool.** For the same
+   prompt-injection reason skills can't be code-authored by the model, a
+   coding run is started by an explicit human action on a dedicated Coding
+   page — there is no `start_coding_task` tool in the chat loop. A document
+   the chat model is summarizing must not be able to talk it into launching
+   an edit-and-test run.
+
+5. **The model chooses *when* to test, not *what* to run.** `run_tests` runs
+   a **configured** command (default `pytest -q`, overridable per run/repo) —
+   the agent decides when to invoke it and reads the output; it does not get
+   an arbitrary-shell tool. That keeps the new execution surface a single,
+   known command rather than "the model can run anything." An allowlisted
+   `run_command` is a possible later extension, explicitly out of the
+   walking skeleton.
+
+6. **Structured, persisted run log — debug it like a distributed system.**
+   Every step (model call, tool call + args + result, test run + exit
+   status, role transition) is appended to an ordered log persisted to
+   `runs/<id>.json` — a new file-based store mirroring `conversations.py`
+   (`runs/` gitignored alongside `conversations/`, `uploads/`, `chroma/`). A
+   run is fully reconstructable and inspectable after the fact, not just a
+   live stream that scrolls away. This is the "log every agent step, model
+   choice, tool call, and test result" requirement, made durable.
+
+7. **Roles are prompts + tool subsets, not new engines (Phase 18).** The
+   multi-agent variant does not add a second loop implementation. Writer,
+   tester, and security-reviewer are the *same* `coding_agent` loop invoked
+   with different system prompts and different tool subsets over the *same*
+   worktree and the *same* run log. An orchestrator sequences them. Reuse the
+   machinery; vary the configuration.
+
+---
+
+## Phase 16 — Sandboxed coding-agent walking skeleton
+
+The heart of this capability, built the same way the chat loop was (Phase 3):
+prove the **entire cycle** with a trivial change before attempting a real
+multi-file task. The cycle is: create worktree → agent makes one edit → run
+tests → produce diff → stop → human approves (apply) or discards → worktree
+cleaned up.
+
+- **`coding_agent.py`** (new, sibling to `agent.py`): a bounded loop
+  (`MAX_STEPS` guard, same discipline as `MAX_ITERATIONS`) with its own
+  system prompt and its own `_execute_coding_tool()` dispatch. Tools, all
+  path-confined to the worktree root (resolve + check the parent is inside
+  the root, the same guard `delete_document` uses — never a bare string
+  compare):
+  - `list_files(glob=None)` — see the repo.
+  - `read_file(path)` — read within the worktree.
+  - `write_file(path, content)` — write within the worktree.
+  - `run_tests()` — run the configured command (default `pytest -q`) as a
+    subprocess in the worktree, return truncated stdout/stderr + exit code.
+  - `finish(summary)` — the model signals it's done; ends the loop cleanly
+    (alongside the `MAX_STEPS` ceiling).
+  Every Ollama call still goes through `ollama_client.chat` (traffic rule
+  holds); the model name is threaded through and **recorded per step** in the
+  run log.
+- **`runs.py`** (new, file-based store mirroring `conversations.py`):
+  `create(repo_path, instruction) -> RunMeta`, `append_step(id, step)`,
+  `load(id)`, `list_recent(limit)`, `set_status(id, status)`,
+  `delete(id)`. A run is `{id, repo_path, instruction, model, status,
+  created_at, updated_at, steps: [...], base_commit}`; `status` moves through
+  `running → awaiting_approval → applied | discarded | failed`. Persisted to
+  `runs/<id>.json`.
+- **Worktree lifecycle** (thin `git` wrappers, subprocess): create a scratch
+  branch + `git worktree add` off the target repo at HEAD; capture the base
+  commit; on apply, `git diff base..worktree` applied to the working branch;
+  on discard, `git worktree remove --force` + delete the scratch branch.
+  Guard the repo path against an allowlisted roots setting so it can't be
+  pointed at `/` or outside a configured workspace dir.
+- **`server.py`** endpoints (streaming reuses the Phase 15 SSE primitive):
+  - `POST /api/coding/runs` `{repo_path, instruction, model?}` → create the
+    worktree, start the loop, return the run id. The loop runs to
+    `awaiting_approval` (or `failed`), appending steps as it goes.
+  - `GET  /api/coding/runs` and `GET /api/coding/runs/{id}` — list / detail
+    (detail includes the full step log, status, and the unified diff).
+  - `GET  /api/coding/runs/{id}/events` — SSE live step stream.
+  - `POST /api/coding/runs/{id}/apply` — apply the diff to the working
+    branch, remove the worktree, status → `applied`.
+  - `POST /api/coding/runs/{id}/discard` — remove the worktree, status →
+    `discarded`.
+- **Tests:** `runs.py` unit tests (create/append/load/list/status/delete,
+  JSON round-trip) and worktree-wrapper tests against a **real throwaway git
+  repo in `tmp_path`** (git is fast and the whole point is real git behavior —
+  don't mock it); path-confinement rejection tests for each fs tool; a loop
+  test against a **mocked `ollama_client`** that drives a scripted edit +
+  `run_tests` + `finish` and asserts the step log and produced diff. A live
+  E2E under `@pytest.mark.e2e` that runs a trivial real instruction against a
+  fixture repo (gated the same way the model-pull E2E is, if it's slow).
+
+**Done when:** pointed at a real local git repo with a small instruction
+("add a module docstring to X"), the agent edits in a worktree, runs the
+tests, and stops with a diff; **apply** lands exactly that diff on the working
+branch; **discard** leaves the repo byte-for-byte untouched and removes the
+worktree; a runaway is bounded by `MAX_STEPS`; and a write outside the
+worktree root is rejected. The whole run is reconstructable from
+`runs/<id>.json` afterward.
+
+## Phase 17 — Coding page: live run log + diff review + approval
+
+The human-facing half. Parity-first, then polish, same as Phase 9. Reuses the
+`ActivityLog` and `ModelManager` patterns — no new frontend deps, no router
+(a new `View = 'chat' | 'skills' | 'coding'`).
+
+- **`web/src/api.ts`**: `codingRuns()`, `codingRun(id)`, `startCodingRun(...)`,
+  `applyCodingRun(id)`, `discardCodingRun(id)`, and an SSE reader for
+  `/events` modeled on the existing `pullModel` `ReadableStream` loop.
+- **`CodingPage.tsx`** (new): a form (repo path — from an allowlist / recent
+  runs — instruction textarea, model picker reusing the composer's picker),
+  a **live step log** that is the "distributed-systems" view: each step shows
+  its type, the tool + collapsed args, the result/test output, the model, and
+  a timestamp, streaming in via SSE while `status === 'running'`. A **unified
+  diff viewer** (render `git diff` with simple +/− line coloring — no syntax
+  highlighter dependency for v1). **Approve** / **Discard** buttons, disabled
+  while running. A past-runs list (from `runs/`) so a completed run can be
+  reopened and inspected.
+- Surface run status honestly: `failed` runs show why (the last error / a red
+  test result), never a silent empty panel — same discipline as the app's
+  existing inline error states.
+
+**Done when:** the full workflow is drivable from the browser — describe a
+change, watch the steps stream in, read the diff, Approve (it lands) or
+Discard (it doesn't) — and a past run can be reopened from the history list
+with its complete step log intact.
+
+## Phase 18 — Multi-agent review: writer / tester / security (stretch)
+
+Layered entirely on Phases 16–17's machinery (decision 7) — no second loop
+implementation.
+
+- **Role configs**: three `(system_prompt, allowed_tools)` bundles over the
+  same `coding_agent` loop and the same worktree:
+  - *Writer* — full edit tools; implements the change.
+  - *Tester* — write/read/run_tests; adds or updates tests and runs them,
+    reporting pass/fail honestly (a failing suite is a real, surfaced
+    outcome, never smoothed over).
+  - *Security reviewer* — **read-only over the diff**; emits structured
+    findings, cannot edit.
+- **Orchestrator** (in `coding_agent.py`): sequences writer → tester, looping
+  writer↔tester until the suite passes or a bounded retry ceiling is hit,
+  then runs the security review over the final diff. Every step is appended to
+  the one shared run log, **tagged by role**, so the whole collaboration is a
+  single inspectable timeline.
+- **UI**: the step log groups by role; security findings render as a distinct
+  block attached to the diff. The approval gate is unchanged — still one
+  diff, one human decision. Multi-agent changes *how* the diff is produced,
+  not the safety boundary around merging it.
+
+**Done when:** one instruction yields a diff authored by the writer, validated
+by the tester (tests actually ran — pass or an honestly-reported failure), and
+reviewed by the security role with findings attached, all in one run log,
+still gated behind a single human approval before it can touch a real branch.
 
 ---
 
