@@ -234,6 +234,30 @@ def test_loop_marks_failed_on_unexpected_exception(repo, monkeypatch):
     assert not worktree.worktree_path(meta.id).exists()
 
 
+def test_apply_run_freezes_diff_and_lands_change(repo):
+    """End-to-end apply over a real repo: the change lands on the working
+    tree, the diff is frozen into the record before the worktree is torn
+    down, and get_diff still works afterward (regression for the 500 that hit
+    when the diff was recomputed from an already-removed worktree)."""
+    base = worktree.head_commit(repo)
+    meta = runs.create(str(repo), "add file", "qwen2.5", base_commit=base)
+    worktree.create(repo, meta.id, base)
+    coding_agent._write_file(worktree.worktree_path(meta.id), "new.py", "x = 1\n")
+    runs.set_status(meta.id, "awaiting_approval")
+
+    applied = coding_agent.apply_run(meta.id)
+
+    assert applied.status == "applied"
+    # Diff frozen into the record, and the worktree is gone.
+    assert "new.py" in applied.diff
+    assert not worktree.worktree_path(meta.id).exists()
+    # get_diff serves the stored diff post-apply instead of crashing on the
+    # missing worktree.
+    assert coding_agent.get_diff(meta.id) == applied.diff
+    # The change actually landed on the repo's working tree.
+    assert (repo / "new.py").read_text() == "x = 1\n"
+
+
 def test_apply_run_rejects_wrong_status(repo):
     base = worktree.head_commit(repo)
     meta = runs.create(str(repo), "instr", "qwen2.5", base_commit=base)

@@ -94,6 +94,23 @@ def test_get_coding_run_still_running_skips_diff_call(monkeypatch):
     assert resp.json()["diff"] == ""
 
 
+def test_get_applied_coding_run_serves_stored_diff(monkeypatch):
+    """Regression: an applied run's worktree is gone (apply tore it down), so
+    the diff must come from the frozen record (runs.set_diff at apply time),
+    never a live worktree.diff — which ran git in a now-missing cwd and raised
+    a bare FileNotFoundError that escaped the WorktreeError guard as a 500."""
+    meta = _fake_meta(status="applied", diff="diff --git a b\nstored\n")
+    monkeypatch.setattr(runs, "load", lambda run_id: meta)
+
+    def boom(run_id, base_commit):
+        raise AssertionError("worktree.diff must not be called for an applied run")
+
+    monkeypatch.setattr(worktree, "diff", boom)
+    resp = _client().get("/api/coding/runs/run1")
+    assert resp.status_code == 200
+    assert resp.json()["diff"] == "diff --git a b\nstored\n"
+
+
 def test_get_coding_run_missing_404s(monkeypatch):
     def fake_load(run_id):
         raise runs.RunError("nope")

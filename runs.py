@@ -46,6 +46,7 @@ class RunMeta:
     updated_at: str
     steps: list[dict] = field(default_factory=list)
     base_commit: str = ""
+    diff: str = ""
 
 
 def _path(run_id: str) -> Path:
@@ -88,6 +89,7 @@ def _meta(raw: dict) -> RunMeta:
         updated_at=raw["updated_at"],
         steps=raw["steps"],
         base_commit=raw["base_commit"],
+        diff=raw.get("diff", ""),
     )
 
 
@@ -111,6 +113,7 @@ def create(
             "updated_at": now,
             "steps": [],
             "base_commit": base_commit,
+            "diff": "",
         }
         _write(record)
         return _meta(record)
@@ -140,6 +143,20 @@ def set_status(run_id: str, status: str) -> None:
         if raw is None:
             raise RunError(f"No such run: {run_id!r}")
         raw["status"] = status
+        raw["updated_at"] = _now()
+        _write(raw)
+
+
+def set_diff(run_id: str, diff: str) -> None:
+    """Persist the run's final diff as an immutable artifact. Called at apply
+    time, right before the worktree is torn down — after that the diff can no
+    longer be recomputed (no worktree to diff), so it's frozen here and served
+    from the record for terminal states instead of re-derived."""
+    with _lock:
+        raw = _read_raw(run_id)
+        if raw is None:
+            raise RunError(f"No such run: {run_id!r}")
+        raw["diff"] = diff
         raw["updated_at"] = _now()
         _write(raw)
 

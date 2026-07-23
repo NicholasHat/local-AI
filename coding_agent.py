@@ -383,8 +383,28 @@ def start(repo_path: str, instruction: str, model: str | None = None) -> runs.Ru
 
 
 def get_diff(run_id: str) -> str:
+    """The run's diff, sourced correctly for its state — the single place that
+    knows where a run's diff lives:
+
+    - `applied`: the worktree is gone (apply tore it down), so serve the diff
+      frozen into the record at apply time (runs.set_diff).
+    - `awaiting_approval` / `failed`: the worktree still exists — compute live.
+      `failed` keeps its worktree on purpose (see _run's except block).
+    - `running` / `discarded`: nothing meaningful to show.
+
+    The live path is guarded broadly: a missing worktree degrades to an empty
+    diff rather than escaping as an error (worktree.diff runs git in the
+    worktree's cwd, which raises a bare FileNotFoundError — an OSError, not a
+    WorktreeError — if that directory is gone)."""
     meta = runs.load(run_id)
-    return worktree.diff(run_id, meta.base_commit)
+    if meta.status == "applied":
+        return meta.diff
+    if meta.status not in {"awaiting_approval", "failed"}:
+        return ""
+    try:
+        return worktree.diff(run_id, meta.base_commit)
+    except (worktree.WorktreeError, OSError):
+        return ""
 
 
 def apply_run(run_id: str) -> runs.RunMeta:
@@ -393,6 +413,11 @@ def apply_run(run_id: str) -> runs.RunMeta:
         raise ValueError(
             f"Run {run_id!r} is not awaiting approval (status={meta.status!r})."
         )
+    # Freeze the diff before applying — worktree.apply removes the worktree as
+    # its last step, and once it's gone the diff can't be recomputed. Storing
+    # it here keeps the applied change visible in the run history (the audit
+    # log, decision 6) instead of it vanishing with the worktree.
+    runs.set_diff(run_id, worktree.diff(run_id, meta.base_commit))
     worktree.apply(Path(meta.repo_path), run_id, meta.base_commit)
     runs.set_status(run_id, "applied")
     return runs.load(run_id)

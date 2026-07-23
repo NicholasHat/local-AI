@@ -485,21 +485,6 @@ def _coding_run_response(meta: runs.RunMeta) -> CodingRunResponse:
     )
 
 
-def _coding_run_diff(meta: runs.RunMeta) -> str:
-    """The diff is only meaningful once the worktree has something to show
-    and hasn't been torn down yet — a run still `running`, or a `discarded`
-    one whose worktree is gone, just gets an empty diff rather than an
-    error. `failed` is included: its worktree is deliberately left in place
-    (see coding_agent._run's except block) so a human can see what partial
-    edits led to the failure, same reasoning as why it's discardable."""
-    if meta.status not in {"awaiting_approval", "applied", "failed"}:
-        return ""
-    try:
-        return worktree.diff(meta.id, meta.base_commit)
-    except worktree.WorktreeError:
-        return ""
-
-
 @app.post("/api/coding/runs", response_model=CodingRunResponse)
 def create_coding_run(request: CodingRunRequest) -> CodingRunResponse:
     """Kicks off the coding agent loop on a background thread and returns
@@ -528,7 +513,7 @@ def get_coding_run(run_id: str) -> CodingRunDetail:
     return CodingRunDetail(
         **_coding_run_response(meta).model_dump(),
         steps=meta.steps,
-        diff=_coding_run_diff(meta),
+        diff=coding_agent.get_diff(meta.id),
     )
 
 
