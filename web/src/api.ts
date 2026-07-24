@@ -25,8 +25,16 @@ const BASE = '/api'
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE}${path}`, init)
   if (!response.ok) {
-    const detail = await response.text()
-    throw new Error(`${path} failed (${response.status}): ${detail}`)
+    // Prefer FastAPI's `{detail: "..."}` message so users see the actual
+    // reason (e.g. an apply conflict) rather than a raw JSON blob.
+    const body = await response.text()
+    let message = body
+    try {
+      message = (JSON.parse(body).detail as string) ?? body
+    } catch {
+      // non-JSON body — keep the raw text
+    }
+    throw new Error(message)
   }
   return response.json() as Promise<T>
 }
@@ -62,7 +70,13 @@ async function pullModel(
       const line = event.trim()
       if (!line.startsWith('data:')) continue
       const payload = line.slice('data:'.length).trim()
-      if (payload) onProgress(JSON.parse(payload) as PullProgress)
+      if (!payload) continue
+      const update = JSON.parse(payload) as PullProgress
+      // The backend emits a structured error event (rather than aborting the
+      // stream) when a pull fails mid-way — turn it into a real rejection so
+      // the caller shows the actual reason, not a generic stream failure.
+      if (update.error) throw new Error(update.error)
+      onProgress(update)
     }
   }
 }

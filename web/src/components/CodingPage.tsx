@@ -164,7 +164,16 @@ export function CodingPage({
     api
       .codingRunEvents(runMeta.id, (event) => {
         if (watchIdRef.current !== runMeta.id) return
-        if (event.type === 'status') return // terminal signal only; detail refetch below is the source of truth
+        if (event.type === 'status') {
+          // The authoritative terminal status, straight from the stream that
+          // just reported it. Apply it to activeMeta directly — status is
+          // derived from activeMeta only (see the note above), and the
+          // best-effort detail refetch in .finally() might fail, so relying
+          // on that refetch to flip running→awaiting_approval would leave the
+          // badge stuck on "running" and the approve/discard buttons disabled.
+          setActiveMeta((prev) => (prev ? { ...prev, status: event.status } : prev))
+          return
+        }
         setLiveSteps((prev) => [...prev, event])
       })
       .catch((e) => {
@@ -361,6 +370,21 @@ export function CodingPage({
                 </div>
               </div>
 
+              {status === 'applied' && (
+                <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+                  ✓ Applied to your working branch as an uncommitted change —
+                  review it in your repo and commit when you're ready. Start
+                  another run above.
+                </div>
+              )}
+
+              {status === 'discarded' && (
+                <div className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-600">
+                  Discarded — the worktree was removed and your repo was left
+                  untouched.
+                </div>
+              )}
+
               {status === 'failed' && (
                 <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                   This run failed — see the error step above. The worktree is
@@ -368,6 +392,16 @@ export function CodingPage({
                   discarding it.
                 </div>
               )}
+
+              {status === 'awaiting_approval' &&
+                activeDetail &&
+                !activeDetail.diff.trim() && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                    The agent ended without changing any files — there's
+                    nothing to apply. Discard this run; a more specific
+                    instruction or a more capable model usually helps.
+                  </div>
+                )}
 
               <div>
                 <h2 className="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">

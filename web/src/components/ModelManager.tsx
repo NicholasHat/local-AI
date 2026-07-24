@@ -1,6 +1,41 @@
 import { useState } from 'react'
 import { api } from '../api'
+import { formatBytes } from '../format'
 import type { ModelInfo, ModelLibraryEntry, PullProgress } from '../types'
+
+// Ollama streams the same `status` string for many events while only the
+// completed/total byte counts advance, so the bar is driven by the byte
+// counts (when a layer is downloading) and the status line carries the phase.
+function PullProgressPanel({ name, progress }: { name: string; progress: PullProgress | null }) {
+  const total = progress?.total
+  const completed = progress?.completed ?? 0
+  const pct = total ? Math.min(100, Math.round((completed / total) * 100)) : null
+
+  return (
+    <div className="mt-3 flex flex-col gap-1.5 rounded-md border border-denim-100 bg-denim-50 p-2.5">
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <span className="truncate font-medium text-denim-700">Pulling {name}</span>
+        <span className="shrink-0 text-denim-600">
+          {progress?.status ?? 'starting…'}
+          {pct !== null ? ` · ${pct}%` : ''}
+        </span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-denim-100">
+        <div
+          className={`h-full bg-denim-500 transition-all duration-300 ${
+            pct === null ? 'w-1/3 animate-pulse' : ''
+          }`}
+          style={pct === null ? undefined : { width: `${pct}%` }}
+        />
+      </div>
+      {total ? (
+        <span className="text-xs text-neutral-400">
+          {formatBytes(completed)} / {formatBytes(total)}
+        </span>
+      ) : null}
+    </div>
+  )
+}
 
 export function ModelManager({
   open,
@@ -110,9 +145,7 @@ export function ModelManager({
                     )}
                   </span>
                   {pulling === entry.name && (
-                    <span className="text-xs text-denim-600">
-                      {progress?.status ?? 'starting…'}
-                    </span>
+                    <span className="text-xs text-denim-600">pulling…</span>
                   )}
                 </button>
               ))}
@@ -135,11 +168,7 @@ export function ModelManager({
             </button>
           </div>
 
-          {pulling && !library.some((entry) => entry.name === pulling) && (
-            <p className="mt-2 text-xs text-denim-600">
-              Pulling {pulling}… {progress?.status ?? ''}
-            </p>
-          )}
+          {pulling && <PullProgressPanel name={pulling} progress={progress} />}
           {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
         </div>
       </div>
