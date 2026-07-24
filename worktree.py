@@ -84,13 +84,82 @@ def diff(run_id: str, base_commit: str) -> str:
     return _git("diff", "--cached", base_commit, cwd=wt_path).stdout
 
 
+def _read(path: Path) -> str:
+    return path.read_text() if path.exists() else ""
+
+
+def _show(repo_path: Path, commit: str, rel: str) -> str:
+    """The content of `rel` at `commit`, or '' if it didn't exist there (a
+    file the run newly created has no ancestor version)."""
+    result = subprocess.run(
+        ["git", "show", f"{commit}:{rel}"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout if result.returncode == 0 else ""
+
+
+def _merge3(ours: str, base: str, theirs: str) -> tuple[str, bool]:
+    """A 3-way content merge via `git merge-file` — git's own merge engine.
+    Returns (merged text, clean): clean is False only when the two sides edit
+    the SAME region. Touches nothing on disk outside a temp dir, so a conflict
+    can be reported without ever writing markers into the real working tree."""
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        (d / "ours").write_text(ours)
+        (d / "base").write_text(base)
+        (d / "theirs").write_text(theirs)
+        merge_file = ["git", "merge-file", "-p"]
+        merge_file += [str(d / "ours"), str(d / "base"), str(d / "theirs")]
+        result = subprocess.run(merge_file, capture_output=True, text=True)
+    # merge-file's exit code is the conflict count (0 = clean, >0 = conflicts).
+    return result.stdout, result.returncode == 0
+
+
 def apply(repo_path: Path, run_id: str, base_commit: str) -> None:
-    """Land the run's diff onto repo_path's currently checked-out branch as
-    a plain uncommitted change — the human reviews/commits it themselves,
-    nothing auto-merges — then clean up the worktree and scratch branch."""
-    patch = diff(run_id, base_commit)
-    if patch.strip():
-        _git("apply", cwd=repo_path, input=patch)
+    """Merge the run's changes into repo_path's working tree as uncommitted
+    edits — the human reviews/commits them, nothing auto-commits — then tear
+    down the worktree.
+
+    Uses a real per-file 3-way merge (base = the file at base_commit, theirs =
+    the run's version, ours = the working tree's current version) rather than
+    `git apply`, which refuses on ANY context drift. This makes approving
+    succeed even when the working tree moved on since the run started — an
+    earlier approved run that left uncommitted edits, or the user's own
+    changes. Only genuinely OVERLAPPING edits conflict; every merge is
+    computed first and the working tree is written only if all are clean, so a
+    conflict aborts with a clear error and leaves the tree exactly as it was
+    (no half-applied state, no conflict markers)."""
+    wt = worktree_path(run_id)
+    _git("add", "-A", cwd=wt)  # so run-created (untracked) files show in the list
+    names = _git("diff", "--name-only", base_commit, cwd=wt).stdout.split()
+
+    merged: dict[str, str] = {}
+    conflicts: list[str] = []
+    for rel in names:
+        result, clean = _merge3(
+            ours=_read(repo_path / rel),
+            base=_show(repo_path, base_commit, rel),
+            theirs=_read(wt / rel),
+        )
+        if clean:
+            merged[rel] = result
+        else:
+            conflicts.append(rel)
+
+    if conflicts:
+        raise WorktreeError(
+            "the repository changed since this run started, conflicting with "
+            f"this run's edits to {', '.join(conflicts)}. Discard this run and "
+            "start a new one against the current state of the repo."
+        )
+
+    for rel, content in merged.items():
+        target = repo_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+
     remove(repo_path, run_id)
 
 

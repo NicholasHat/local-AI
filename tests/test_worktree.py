@@ -138,3 +138,49 @@ def test_apply_with_no_changes_is_a_noop_cleanup(repo):
 
     assert (repo / "existing.txt").read_text() == "original\n"
     assert not worktree.worktree_path("run1").exists()
+
+
+def test_apply_merges_nonoverlapping_drift(repo):
+    """The working tree drifted from base_commit since the run started (an
+    earlier approved run's uncommitted edit), in a DIFFERENT region than this
+    run touched — a plain `git apply` would refuse; the 3-way merge combines
+    them."""
+    (repo / "code.py").write_text("a = 1\nb = 2\nc = 3\n")
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-q", "-m", "add code", cwd=repo)
+    base = worktree.head_commit(repo)
+
+    worktree.create(repo, "run1", base)
+    # The run edits the FIRST line.
+    (worktree.worktree_path("run1") / "code.py").write_text("a = 100\nb = 2\nc = 3\n")
+    # The working tree drifted on the LAST line, uncommitted.
+    (repo / "code.py").write_text("a = 1\nb = 2\nc = 300\n")
+
+    worktree.apply(repo, "run1", base)
+
+    merged = (repo / "code.py").read_text()
+    assert "a = 100" in merged  # the run's edit
+    assert "c = 300" in merged  # the pre-existing drift, preserved
+    assert not worktree.worktree_path("run1").exists()
+
+
+def test_apply_conflict_aborts_without_touching_working_tree(repo):
+    """When the run and the working tree edit the SAME region, apply must
+    raise and leave the working tree byte-for-byte as it was — no partial
+    write, no conflict markers dumped in — and keep the worktree so the run
+    can still be discarded."""
+    (repo / "code.py").write_text("value = 1\n")
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-q", "-m", "add code", cwd=repo)
+    base = worktree.head_commit(repo)
+
+    worktree.create(repo, "run1", base)
+    (worktree.worktree_path("run1") / "code.py").write_text("value = 2\n")  # run
+    (repo / "code.py").write_text("value = 3\n")  # working tree, same line
+
+    with pytest.raises(worktree.WorktreeError):
+        worktree.apply(repo, "run1", base)
+
+    assert (repo / "code.py").read_text() == "value = 3\n"  # untouched
+    assert "<<<<<<<" not in (repo / "code.py").read_text()
+    assert worktree.worktree_path("run1").exists()  # preserved for discard

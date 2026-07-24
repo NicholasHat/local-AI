@@ -302,6 +302,24 @@ def test_pull_model_streams_progress(client, monkeypatch):
     assert "success" in resp.text
 
 
+def test_pull_model_failure_streams_error_event_not_abort(client, monkeypatch):
+    """A pull that fails mid-stream (unknown model, registry error) must be
+    reported as a structured error event, not by aborting the response — an
+    aborted chunked stream surfaces in the browser as an opaque 'network
+    error' that hides the real cause."""
+
+    def failing_pull(name):
+        yield {"status": "pulling manifest"}
+        raise RuntimeError("model 'nope' not found")
+
+    monkeypatch.setattr(ollama_client, "pull_model", failing_pull)
+    resp = client.post("/api/models/pull", json={"name": "nope"})
+    assert resp.status_code == 200
+    assert "pulling manifest" in resp.text
+    assert '"status": "error"' in resp.text
+    assert "model 'nope' not found" in resp.text
+
+
 def test_delete_model_endpoint(client, monkeypatch):
     captured = {}
     monkeypatch.setattr(

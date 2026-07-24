@@ -37,16 +37,22 @@ MAX_STEPS = 12
 _MAX_OUTPUT_CHARS = 4000
 
 SYSTEM_PROMPT = (
-    "You are a sandboxed coding agent. You are working inside an isolated "
-    "git worktree checked out from a real repository — you may list, read, "
-    "and write files ONLY within it, and run the project's test command. "
-    "Nothing you do here touches the real branch; a human reviews your diff "
-    "and explicitly approves or discards it afterward, so it is safe to "
-    "make the change and check your own work. Make the smallest change that "
-    "satisfies the instruction. Run the tests to check your work before "
-    "finishing when the repo has a way to run them. Call finish(summary) "
-    "exactly once you are done (or once you've concluded no change is "
-    "needed), summarizing what you changed and why."
+    "You are a coding agent working inside an isolated git worktree checked "
+    "out from a real repository. Treat it as an ordinary project directory: "
+    "list, read, and write files within it, and run the project's test "
+    "command. Nothing here touches the real branch — a human reviews your "
+    "diff and approves or discards it afterward — so make the change "
+    "directly and check your own work.\n\n"
+    "Act ONLY through tools. Never describe, outline, or announce an action "
+    "you could take with a tool — perform it by calling the tool. If the "
+    "task needs new files, call write_file for each one; do not merely say "
+    "what you would create. Do not comment on the environment, its size, or "
+    "its constraints; just do the work.\n\n"
+    "Make the smallest change that satisfies the instruction. When the repo "
+    "has a way to run tests, run them to check your work before finishing. "
+    "Every run MUST end by calling finish(summary) once the change is "
+    "complete (or once you've concluded no change is needed) — a turn that "
+    "produces neither a tool call nor finish() is a failure."
 )
 
 
@@ -413,12 +419,16 @@ def apply_run(run_id: str) -> runs.RunMeta:
         raise ValueError(
             f"Run {run_id!r} is not awaiting approval (status={meta.status!r})."
         )
-    # Freeze the diff before applying — worktree.apply removes the worktree as
-    # its last step, and once it's gone the diff can't be recomputed. Storing
-    # it here keeps the applied change visible in the run history (the audit
-    # log, decision 6) instead of it vanishing with the worktree.
-    runs.set_diff(run_id, worktree.diff(run_id, meta.base_commit))
+    # Capture the diff before applying — worktree.apply removes the worktree
+    # as its last step, and once it's gone the diff can't be recomputed. But
+    # only commit it to the record (and flip to `applied`) AFTER the merge
+    # succeeds: a conflicting apply raises, and the run must stay
+    # `awaiting_approval` so it can be discarded or retried, with no stored
+    # diff implying it landed. The frozen diff keeps the applied change visible
+    # in the run history (the audit log, decision 6) once it truly applied.
+    final_diff = worktree.diff(run_id, meta.base_commit)
     worktree.apply(Path(meta.repo_path), run_id, meta.base_commit)
+    runs.set_diff(run_id, final_diff)
     runs.set_status(run_id, "applied")
     return runs.load(run_id)
 

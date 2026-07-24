@@ -215,8 +215,18 @@ def pull_model(request: PullModelRequest) -> StreamingResponse:
     same primitive earmarked for token-streamed chat replies later)."""
 
     def event_stream():
-        for update in ollama_client.pull_model(request.name):
-            yield f"data: {json.dumps(update)}\n\n"
+        # A pull can fail mid-stream — an unknown model name, a registry
+        # error, a full disk — after the 200 and first events have already
+        # been sent, so it can't be turned into an HTTP error status. Letting
+        # the exception escape the generator aborts the chunked response, which
+        # the browser reports as an opaque "network error" hiding the real
+        # cause. Catch it and emit a structured error event, then close the
+        # stream cleanly so the client can show what actually went wrong.
+        try:
+            for update in ollama_client.pull_model(request.name):
+                yield f"data: {json.dumps(update)}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'status': 'error', 'error': str(exc)})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
