@@ -23,8 +23,9 @@ ruff check . && ruff format .
 
 ## Key rules
 - All Ollama calls go through `ollama_client.py` — nowhere else
-- Tool dispatch lives in `agent.py` only — add new tools by adding a function in `tools/` and a case in `_execute_tool()`
-- The second way to add a tool: a skill (`skills.py`) — a directory under `skills/<name>/` with `skill.yaml` + `prompt.md` or `run.py`, discovered fresh every turn, no code change needed. See `skills/README.md`. The model's own `create_skill` tool can only write instruction skills (`prompt.md`), never code (`run.py`) — that boundary is structural, not a convention, and must stay that way.
+- Tool dispatch for the **chat** agent lives in `agent.py` only — add new tools by adding a function in `tools/` and a case in `_execute_tool()`
+- The second way to add a chat tool: a skill (`skills.py`) — a directory under `skills/<name>/` with `skill.yaml` + `prompt.md` or `run.py`, discovered fresh every turn, no code change needed. See `skills/README.md`. The model's own `create_skill` tool can only write instruction skills (`prompt.md`), never code (`run.py`) — that boundary is structural, not a convention, and must stay that way.
+- The **coding agent** (`coding_agent.py`) is a deliberately separate loop with its own `_execute_coding_tool()` dispatch and a smaller tool set (list/read/write files + run tests), confined to a throwaway `git worktree`. It is never merged into `agent.py`'s dispatch and never exposed as a chat tool — it only starts from an explicit human action on the Coding page. This keeps the chat model, which reads untrusted documents and search results, structurally unable to trigger code execution. See `plan.md`'s Phase 16–18 decisions for the full reasoning.
 - Conversation history source of truth is `memory.py`, held server-side in `server.py` — the frontend never owns assistant state, it re-fetches after each mutation
 - Model name comes from env var `OLLAMA_MODEL` by default, overridable per-session via `POST /api/settings/model` — never hardcoded
 - Use `pathlib.Path` for all file I/O

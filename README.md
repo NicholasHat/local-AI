@@ -2,17 +2,17 @@
 
 ![status](https://img.shields.io/badge/status-actively%20developing-brightgreen)
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
-![tests](https://img.shields.io/badge/tests-123%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-181%20passing-brightgreen)
 
 A locally-run AI assistant (via [Ollama](https://ollama.com)) that can chat,
-search your documents (RAG), read & fill PDF forms, and grow its own skills —
-with **no data ever leaving your machine**. No cloud APIs, no API keys, fully
-private.
+search your documents (RAG), read & fill PDF forms, grow its own skills, and
+edit code in your local repos under human approval — with **no data ever
+leaving your machine**. No cloud APIs, no API keys, fully private.
 
 > **Status:** chat, agent loop, RAG, PDF tools, model management, persisted
-> chat history, and a file-based skills system are all working and tested,
-> behind a React frontend backed by a FastAPI API. See the
-> [roadmap](#roadmap) for what's next.
+> chat history, a file-based skills system, and a sandboxed coding agent are
+> all working and tested, behind a React frontend backed by a FastAPI API.
+> See the [roadmap](#roadmap) for what's next.
 
 Built from scratch to understand how modern AI agents actually work under the
 hood: the tool-calling loop, retrieval-augmented generation, and function
@@ -39,6 +39,11 @@ local open-source models.
   new one
 - 🗑️ **Un-attaches documents** — remove an uploaded file and its indexed
   chunks together, from the same sidebar you uploaded it in
+- 🛠️ **Writes code in your own repos** — describe a change on the Coding
+  page, and a second, sandboxed agent plans it, edits files, and runs your
+  tests inside a throwaway git worktree; you watch every step stream in live
+  and review the diff before **Approve** lands it on your working branch (or
+  **Discard** throws it away, untouched)
 
 ## How it works
 
@@ -70,6 +75,35 @@ until the model produces a final answer. Adding a capability is either writing
 a function and registering it, or dropping a skill file on disk — no restart
 required.
 
+The **coding agent is a second, separate loop**, reachable only from the
+Coding page — never a chat tool:
+
+```
+   Coding page (web/)
+        │  HTTP (/api/coding/*), steps stream live over SSE
+   ┌────▼─────┐        ┌──────────────┐
+   │  Coding  │◄──────►│ Ollama (LLM) │   same local model, tool-calling
+   │  agent   │        └──────────────┘
+   │  loop    │  coding_agent.py — its own _execute_coding_tool() dispatch
+   └────┬─────┘
+tool call│ result — every step appended to runs/<id>.json
+   ┌────▼─────────────────────────────────────┐
+   │  git worktree (scratch branch off HEAD)   │
+   │   • list_files / read_file / write_file   │  confined to the
+   │   • run_tests (configured test command)   │  worktree root
+   └────────────────┬───────────────────────────┘
+                     │ diff
+              ┌──────▼───────┐
+              │ human review │  Approve → merges to the working branch
+              │ (Coding page)│  Discard → worktree removed, repo untouched
+              └──────────────┘
+```
+
+The worktree is the sandbox, the diff, and the undo — all three. The agent
+only edits files and runs tests inside that disposable checkout; nothing
+touches the real branch until a human reads the diff and clicks **Approve**.
+**Discard** removes the worktree, and the real repo was never touched.
+
 ## Tech stack
 
 | Area | Choice |
@@ -82,6 +116,7 @@ required.
 | Vector store | ChromaDB |
 | Skills | file-based (`skill.yaml` + `prompt.md` or `run.py`), no sandbox — see [`skills/README.md`](skills/README.md) |
 | Conversation history | file-based (`conversations/<id>.json`), same pattern as skills — no database |
+| Coding agent | separate loop (`coding_agent.py`), isolated in a `git worktree` per run — see [Engineering notes](#engineering-notes) |
 | Tests / lint | pytest (unit + live e2e) · ruff · oxlint |
 
 ## Quickstart
@@ -133,11 +168,21 @@ A few decisions I made deliberately, and why:
 - **The frontend never owns assistant state.** Conversation history, the
   active model, and skills all live server-side; the UI re-fetches after
   every mutation instead of keeping a parallel copy.
+- **Isolation replaces prohibition for the coding agent.** Every other tool in
+  this app is in-process with no sandbox because the chat model can never run
+  code it wrote (`create_skill` structurally can't emit a `run.py`). The
+  coding agent deliberately crosses that line, so instead: it is a *separate*
+  loop with its own smaller tool set, started only by an explicit human
+  action (never a chat tool), and it can only edit files and run tests
+  **inside a throwaway `git worktree` on a scratch branch**. Approving copies
+  that diff onto the real branch; discarding removes the worktree — the real
+  branch is never touched either way. See `plan.md`'s Phase 16–18 decisions
+  for the full reasoning.
 
 ## Tests
 
 ```bash
-pytest tests/ -v      # 123 tests, no live model required
+pytest tests/ -v      # 181 tests, no live model required
 pytest -m e2e -v       # live-model tests; skips cleanly if Ollama isn't running
 ruff check .
 cd web && npm run build && npm run lint
@@ -146,10 +191,13 @@ cd web && npm run build && npm run lint
 The unit suite covers the agent loop (including the runaway-loop guard), PDF
 read/fill (including the trap where pypdf silently "succeeds" on non-form
 PDFs), the ingest → search retrieval path, the skills registry, the
-conversation registry (persistence, title derivation), and the FastAPI
-contract — all mocked, no Ollama required. The e2e suite drives the same
-tools, the API, model switching, and the skills system (including
-self-authoring) against a real running model.
+conversation registry (persistence, title derivation), the coding-agent loop
+and its worktree lifecycle (path-confinement rejection, apply/discard against
+a real throwaway git repo), the run log store, and the FastAPI contract — all
+mocked or against real-but-disposable git repos, no Ollama required. The e2e
+suite drives the same tools, the API, model switching, and the skills system
+(including self-authoring) against a real running model; a live e2e run of
+the coding agent itself is not yet in that suite (see [roadmap](#roadmap)).
 
 ## Roadmap
 
@@ -168,10 +216,19 @@ self-authoring) against a real running model.
       start a new one without losing the last
 - [x] File-based skills system, including browser-based authoring and
       model self-authoring of instruction skills
+- [x] Sandboxed coding agent — a dedicated Coding page starts a second,
+      confined agent loop that edits and tests a real local repo inside a
+      throwaway `git worktree`, with a live streaming step log, a diff
+      viewer, and human Approve/Discard before anything reaches a real
+      branch
 
 **Building next**
 
-- [ ] Streaming responses (token-by-token, via SSE)
-- [ ] More advanced tools — web search, code execution, spreadsheet/CSV
-      analysis, calendar & email drafting
+- [ ] Multi-agent coding review — writer/tester/security-reviewer roles
+      layered on the same coding-agent loop and worktree, one shared run log
+- [ ] Live e2e coverage for the coding agent against a real model and a
+      fixture repo
+- [ ] Streaming responses (token-by-token, via SSE) for chat replies
+- [ ] More advanced chat tools — web search, spreadsheet/CSV analysis,
+      calendar & email drafting
 - [ ] OCR for scanned (non-interactive) PDFs

@@ -4,19 +4,21 @@ A local, private assistant built on Ollama with a tool-calling agent loop, PDF
 read/fill tools, and RAG over local documents. No cloud APIs. See `CLAUDE.md`
 for the pinned stack and hard rules — this plan sequences the build.
 
-**Status (2026-07-15): Phases 1–15 complete.** Plus a Perplexity-style React
+**Status (2026-07-30): Phases 1–17 complete.** Plus a Perplexity-style React
 redesign (denim-blue/gray/white theme, autosizing composer, inline model
 picker, a standalone Skills page, and a tool-activity log panel — not
 separately phased, done as a direct UI request). The app is FastAPI + React
 (`web/`), with model selection, a file-based skills system, persisted
-multi-conversation history, document removal, and pulling additional models
-from the browser. The Streamlit UI (Phase 6) has been fully cut over and
-removed (Phase 12). See each phase's "Done when" line for what was verified.
+multi-conversation history, document removal, pulling additional models from
+the browser, and a sandboxed coding agent (`coding_agent.py`) with its own
+Coding page — describe a change, watch it edit and test a real repo inside a
+throwaway `git worktree` via a live step log, then Approve or Discard the
+diff. The Streamlit UI (Phase 6) has been fully cut over and removed (Phase
+12). See each phase's "Done when" line for what was verified.
 
-**Phases 16–18 below are planned (2026-07-23), not yet built** — a sandboxed
-coding agent (open a repo → plan → edit in an isolated worktree → run tests →
-reviewable diff → human approval before anything merges), and a multi-agent
-writer/tester/security-reviewer variant as a stretch on top of it.
+**Phase 18 below is planned (2026-07-23), not yet built** — a multi-agent
+writer/tester/security-reviewer variant layered on the Phase 16–17 coding
+agent machinery.
 
 ## Guiding principle
 
