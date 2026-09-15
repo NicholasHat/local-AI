@@ -1,0 +1,162 @@
+# Local benchmark suite (plan.md decision 5, Phases 19–26).
+#
+# Every task has a deterministic, mechanical `check` so scores are
+# reproducible offline with no LLM judge:
+#   contains:    {any: [..]}          answer contains any listed string (case-insensitive)
+#   regex:       {pattern: ..}        pattern found in the answer (case-insensitive)
+#   number:      {value: N, tol: T}   the LAST number in the answer is within tol of value
+#   json:        {keys: [..]}         answer (fence-tolerant) parses as a JSON object with keys
+#   tool_called: {tool: name, tools: [allowlist]}  run through agent.run; that tool was called
+#
+# Coding tasks NEVER execute model output — they check shape/known answers.
+# Tool tasks only use side-effect-free tools (get_time, search_documents).
+version: 1
+tasks:
+  # --- reasoning ------------------------------------------------------------
+  - id: reasoning-bat-ball
+    category: reasoning
+    prompt: >-
+      A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the
+      ball. How much does the ball cost, in cents? Answer with just the number.
+    check: {type: number, value: 5, tol: 0}
+  - id: reasoning-sisters
+    category: reasoning
+    prompt: >-
+      Sally has 3 brothers. Each brother has 2 sisters. How many sisters does
+      Sally have? Answer with just the number.
+    check: {type: number, value: 1, tol: 0}
+  - id: reasoning-widgets
+    category: reasoning
+    prompt: >-
+      If 5 machines make 5 widgets in 5 minutes, how many minutes do 100
+      machines take to make 100 widgets? Answer with just the number.
+    check: {type: number, value: 5, tol: 0}
+  - id: reasoning-sequence
+    category: reasoning
+    prompt: >-
+      What is the next number in the sequence 2, 6, 12, 20, 30? Answer with
+      just the number.
+    check: {type: number, value: 42, tol: 0}
+
+  # --- coding ---------------------------------------------------------------
+  - id: coding-palindrome
+    category: coding
+    prompt: >-
+      Write a Python function named is_palindrome that takes a string and
+      returns True if it reads the same forwards and backwards. Return only
+      the code.
+    check: {type: regex, pattern: 'def\s+is_palindrome\s*\('}
+  - id: coding-print-output
+    category: coding
+    prompt: >-
+      What does this Python code print? Answer with just the output.
+
+      x = [1, 2, 3]
+      print(sum(x) * len(x))
+    check: {type: number, value: 18, tol: 0}
+  - id: coding-list-comprehension
+    category: coding
+    prompt: >-
+      What does this Python code print? Answer with just the output.
+
+      print([n * n for n in range(4)])
+    check: {type: regex, pattern: '\[\s*0\s*,\s*1\s*,\s*4\s*,\s*9\s*\]'}
+  - id: coding-fizzbuzz-shape
+    category: coding
+    prompt: >-
+      Write a Python function fizzbuzz(n) that returns "FizzBuzz" for
+      multiples of 15, "Fizz" for multiples of 3, "Buzz" for multiples of 5,
+      and the number as a string otherwise. Return only the code.
+    check: {type: regex, pattern: 'def\s+fizzbuzz\s*\([\s\S]*15[\s\S]*FizzBuzz'}
+
+  # --- instruction ----------------------------------------------------------
+  - id: instruction-uppercase
+    category: instruction
+    prompt: >-
+      Reply with exactly the word BANANA in capital letters and nothing else.
+    check: {type: regex, pattern: '^\W*BANANA\W*$'}
+  - id: instruction-three-fruits
+    category: instruction
+    prompt: >-
+      List exactly three fruits, comma-separated, on one line, no other text.
+    check: {type: regex, pattern: '^[^\n,]+,[^\n,]+,[^\n,]+$'}
+  - id: instruction-reverse
+    category: instruction
+    prompt: >-
+      Reverse the word "stressed" and answer with just the reversed word.
+    check: {type: contains, any: [desserts]}
+  - id: instruction-no-e
+    category: instruction
+    prompt: >-
+      Answer with a single common English colour word that does not contain
+      the letter e. Reply with just the word.
+    check: {type: regex, pattern: '^\W*(black|brown|pink|gold|gray|tan|cyan|indigo|maroon|navy|plum|ruby|aqua|lilac|ivory|khaki|coral|amber|violet|crimson|mint)\W*$'}
+
+  # --- tools ----------------------------------------------------------------
+  - id: tools-get-time
+    category: tools
+    prompt: What is the current UTC time right now? Use a tool to find out.
+    check: {type: tool_called, tool: get_time, tools: [get_time, search_documents]}
+  - id: tools-search-docs
+    category: tools
+    prompt: >-
+      Search the uploaded documents for the phrase "quarterly revenue" and
+      tell me what you find.
+    check: {type: tool_called, tool: search_documents, tools: [get_time, search_documents]}
+  - id: tools-time-only
+    category: tools
+    prompt: I need a timestamp for a log entry. Get the exact current time.
+    check: {type: tool_called, tool: get_time, tools: [get_time]}
+  - id: tools-search-only
+    category: tools
+    prompt: >-
+      Look through my uploaded documents for anything about "warranty
+      period" and summarize it.
+    check: {type: tool_called, tool: search_documents, tools: [search_documents]}
+
+  # --- json -----------------------------------------------------------------
+  - id: json-person
+    category: json
+    prompt: >-
+      Return a JSON object with keys "name" (string) and "age" (integer) for a
+      fictional person. Output only the JSON.
+    check: {type: json, keys: [name, age]}
+  - id: json-city
+    category: json
+    prompt: >-
+      Return a JSON object describing Paris with keys "city", "country", and
+      "population". Output only the JSON.
+    check: {type: json, keys: [city, country, population]}
+  - id: json-list
+    category: json
+    prompt: >-
+      Return a JSON object with a key "colors" whose value is a list of three
+      colour names. Output only the JSON.
+    check: {type: json, keys: [colors]}
+  - id: json-nested
+    category: json
+    prompt: >-
+      Return a JSON object with keys "id" and "address", where "address" is an
+      object with keys "street" and "zip". Output only the JSON.
+    check: {type: json, keys: [id, address]}
+
+  # --- knowledge ------------------------------------------------------------
+  - id: knowledge-capital-australia
+    category: knowledge
+    prompt: What is the capital city of Australia? Answer with just the name.
+    check: {type: contains, any: [canberra]}
+  - id: knowledge-water-formula
+    category: knowledge
+    prompt: What is the chemical formula for water? Answer with just the formula.
+    check: {type: contains, any: [h2o, "h₂o"]}
+  - id: knowledge-boiling-point
+    category: knowledge
+    prompt: >-
+      At what temperature in degrees Celsius does water boil at sea level?
+      Answer with just the number.
+    check: {type: number, value: 100, tol: 0}
+  - id: knowledge-planets
+    category: knowledge
+    prompt: >-
+      Which planet in our solar system is the largest? Answer with just the name.
+    check: {type: contains, any: [jupiter]}
