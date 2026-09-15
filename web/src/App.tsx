@@ -2,22 +2,32 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from './api'
 import { ActivityLog } from './components/ActivityLog'
 import { CodingPage } from './components/CodingPage'
+import { ComparePage } from './components/ComparePage'
 import { Composer } from './components/Composer'
-import { ModelManager } from './components/ModelManager'
+import { ModelsPage } from './components/ModelsPage'
+import { ProjectsPage } from './components/ProjectsPage'
 import { Sidebar } from './components/Sidebar'
 import type { View } from './components/Sidebar'
 import { SkillsPage } from './components/SkillsPage'
+import { SpacesPage } from './components/SpacesPage'
 import { Transcript } from './components/Transcript'
+import { WorkflowsPage } from './components/WorkflowsPage'
 import type {
   ConversationMessage,
   ConversationMeta,
   DocumentInfo,
   HealthResponse,
-  ModelLibraryEntry,
+  JobKind,
   ModelsResponse,
   SkillInfo,
   SkillWriteRequest,
 } from './types'
+
+// Cross-page navigation targets: a project opens its space or a linked run,
+// a workflow run opens its space. Held as {id, nonce} so re-opening the same
+// target remounts the page (the pages read their initial target once).
+type SpaceTarget = { id: string; nonce: number }
+type JobTarget = { kind: JobKind; id: string; nonce: number }
 
 const EMPTY_MODELS: ModelsResponse = { models: [], current: null }
 
@@ -33,7 +43,6 @@ function App() {
   const [messages, setMessages] = useState<ConversationMessage[]>([])
   const [documents, setDocuments] = useState<DocumentInfo[]>([])
   const [modelsInfo, setModelsInfo] = useState<ModelsResponse>(EMPTY_MODELS)
-  const [modelLibrary, setModelLibrary] = useState<ModelLibraryEntry[]>([])
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [conversations, setConversations] = useState<ConversationMeta[]>([])
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
@@ -47,7 +56,8 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [view, setView] = useState<View>('chat')
   const [activityLogOpen, setActivityLogOpen] = useState(false)
-  const [modelManagerOpen, setModelManagerOpen] = useState(false)
+  const [spaceTarget, setSpaceTarget] = useState<SpaceTarget | null>(null)
+  const [jobTarget, setJobTarget] = useState<JobTarget | null>(null)
 
   const refreshHealth = useCallback(async () => setHealth(await api.health()), [])
   const refreshConversation = useCallback(
@@ -67,10 +77,6 @@ function App() {
     [],
   )
   const refreshModels = useCallback(async () => setModelsInfo(await api.models()), [])
-  const refreshModelLibrary = useCallback(
-    async () => setModelLibrary(await api.modelLibrary()),
-    [],
-  )
   const refreshSkills = useCallback(async () => setSkills(await api.skills()), [])
 
   const load = useCallback(async () => {
@@ -82,7 +88,6 @@ function App() {
         refreshConversation(),
         refreshDocuments(),
         refreshModels(),
-        refreshModelLibrary(),
         refreshSkills(),
       ])
       // Sequential: the active conversation is only guaranteed to exist
@@ -99,7 +104,6 @@ function App() {
     refreshConversation,
     refreshDocuments,
     refreshModels,
-    refreshModelLibrary,
     refreshSkills,
     refreshConversationList,
     refreshActiveConversationId,
@@ -234,6 +238,20 @@ function App() {
     }
   }
 
+  const refreshModelsAndHealth = useCallback(async () => {
+    await Promise.all([refreshModels(), refreshHealth()])
+  }, [refreshModels, refreshHealth])
+
+  function openSpace(id: string) {
+    setSpaceTarget({ id, nonce: Date.now() })
+    setView('spaces')
+  }
+
+  function openJob(kind: JobKind, id: string) {
+    setJobTarget({ kind, id, nonce: Date.now() })
+    setView(kind === 'workflow' ? 'workflows' : 'compare')
+  }
+
   if (initializing) {
     return (
       <div className="flex h-screen items-center justify-center text-neutral-400">
@@ -299,7 +317,7 @@ function App() {
           <div className="ml-auto flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setModelManagerOpen((v) => !v)}
+              onClick={() => setView('models')}
               className="flex items-center gap-1.5 rounded-full border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 hover:border-denim-400 hover:text-denim-700"
             >
               <span aria-hidden>🧠</span> Models
@@ -354,8 +372,36 @@ function App() {
             onUpdate={handleUpdateSkill}
             onDelete={handleDeleteSkill}
           />
-        ) : (
+        ) : view === 'coding' ? (
           <CodingPage models={modelsInfo.models} currentModel={modelsInfo.current} />
+        ) : view === 'projects' ? (
+          <ProjectsPage
+            documents={documents}
+            onActiveChanged={refreshHealth}
+            onOpenSpace={openSpace}
+            onOpenJob={openJob}
+          />
+        ) : view === 'spaces' ? (
+          <SpacesPage key={spaceTarget?.nonce ?? 0} initialSpaceId={spaceTarget?.id} />
+        ) : view === 'models' ? (
+          <ModelsPage models={modelsInfo.models} onChanged={refreshModelsAndHealth} />
+        ) : view === 'compare' ? (
+          <ComparePage
+            key={jobTarget?.nonce ?? 0}
+            models={modelsInfo.models}
+            initialJob={
+              jobTarget && jobTarget.kind !== 'workflow'
+                ? { kind: jobTarget.kind, id: jobTarget.id }
+                : null
+            }
+          />
+        ) : (
+          <WorkflowsPage
+            key={jobTarget?.nonce ?? 0}
+            models={modelsInfo.models}
+            initialJobId={jobTarget?.kind === 'workflow' ? jobTarget.id : null}
+            onOpenSpace={openSpace}
+          />
         )}
       </div>
 
@@ -366,15 +412,6 @@ function App() {
         thinking={thinking}
       />
 
-      <ModelManager
-        open={modelManagerOpen}
-        onClose={() => setModelManagerOpen(false)}
-        installed={modelsInfo.models}
-        library={modelLibrary}
-        onChanged={async () => {
-          await Promise.all([refreshModels(), refreshHealth()])
-        }}
-      />
     </div>
   )
 }

@@ -118,7 +118,17 @@ export function CodingPage({
   const [liveSteps, setLiveSteps] = useState<CodingStep[]>([])
   const [streaming, setStreaming] = useState(false)
   const watchIdRef = useRef<string | null>(null)
+  // One live stream at most: a new watch, opening a finished run, or
+  // unmounting aborts the previous fetch so it releases its connection.
+  const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  function abortStream() {
+    abortRef.current?.abort()
+    abortRef.current = null
+  }
+
+  useEffect(() => () => abortRef.current?.abort(), [])
 
   const refreshPastRuns = useCallback(async () => {
     setPastRuns(await api.codingRuns())
@@ -154,6 +164,9 @@ export function CodingPage({
   }, [steps.length])
 
   function startWatching(runMeta: CodingRun) {
+    abortStream()
+    const controller = new AbortController()
+    abortRef.current = controller
     watchIdRef.current = runMeta.id
     setActiveMeta(runMeta)
     setActiveDetail(null)
@@ -162,20 +175,25 @@ export function CodingPage({
     setStreaming(true)
 
     api
-      .codingRunEvents(runMeta.id, (event) => {
-        if (watchIdRef.current !== runMeta.id) return
-        if (event.type === 'status') {
-          // The authoritative terminal status, straight from the stream that
-          // just reported it. Apply it to activeMeta directly — status is
-          // derived from activeMeta only (see the note above), and the
-          // best-effort detail refetch in .finally() might fail, so relying
-          // on that refetch to flip running→awaiting_approval would leave the
-          // badge stuck on "running" and the approve/discard buttons disabled.
-          setActiveMeta((prev) => (prev ? { ...prev, status: event.status } : prev))
-          return
-        }
-        setLiveSteps((prev) => [...prev, event])
-      })
+      .codingRunEvents(
+        runMeta.id,
+        (event) => {
+          if (watchIdRef.current !== runMeta.id) return
+          if (event.type === 'status') {
+            // The authoritative terminal status, straight from the stream
+            // that just reported it. Apply it to activeMeta directly — status
+            // is derived from activeMeta only (see the note above), and the
+            // best-effort detail refetch in .finally() might fail, so relying
+            // on that refetch to flip running→awaiting_approval would leave
+            // the badge stuck on "running" and the approve/discard buttons
+            // disabled.
+            setActiveMeta((prev) => (prev ? { ...prev, status: event.status } : prev))
+            return
+          }
+          setLiveSteps((prev) => [...prev, event])
+        },
+        controller.signal,
+      )
       .catch((e) => {
         if (watchIdRef.current === runMeta.id) setError(errorMessage(e))
       })
@@ -207,6 +225,7 @@ export function CodingPage({
     if (run.status === 'running') {
       startWatching(run)
     } else {
+      abortStream()
       watchIdRef.current = null
       setStreaming(false)
       api

@@ -8,7 +8,26 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export type View = 'chat' | 'skills' | 'coding'
+export type View =
+  | 'chat'
+  | 'projects'
+  | 'workflows'
+  | 'spaces'
+  | 'coding'
+  | 'models'
+  | 'compare'
+  | 'skills'
+
+const NAV: { view: View; icon: string; label: string }[] = [
+  { view: 'chat', icon: '💬', label: 'Chat' },
+  { view: 'projects', icon: '📁', label: 'Projects' },
+  { view: 'workflows', icon: '🔁', label: 'Workflows' },
+  { view: 'spaces', icon: '🗣️', label: 'Spaces' },
+  { view: 'coding', icon: '🛠️', label: 'Coding' },
+  { view: 'models', icon: '🧠', label: 'Models' },
+  { view: 'compare', icon: '⚖️', label: 'Compare' },
+  { view: 'skills', icon: '⚙️', label: 'Skills' },
+]
 
 function NavButton({
   active,
@@ -110,24 +129,15 @@ export function Sidebar({
         </button>
 
         <nav className="flex flex-col gap-1">
-          <NavButton
-            active={view === 'chat'}
-            onClick={() => onChangeView('chat')}
-            icon="💬"
-            label="Chat"
-          />
-          <NavButton
-            active={view === 'skills'}
-            onClick={() => onChangeView('skills')}
-            icon="⚙️"
-            label="Skills"
-          />
-          <NavButton
-            active={view === 'coding'}
-            onClick={() => onChangeView('coding')}
-            icon="🛠️"
-            label="Coding"
-          />
+          {NAV.map((item) => (
+            <NavButton
+              key={item.view}
+              active={view === item.view}
+              onClick={() => onChangeView(item.view)}
+              icon={item.icon}
+              label={item.label}
+            />
+          ))}
         </nav>
 
         <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto">
