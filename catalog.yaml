@@ -1,0 +1,355 @@
+# Curated seed of open-weight model families worth holding locally
+# (plan.md decision 6, Phases 19–26). This is a SEED, not a live index: it
+# is dated, hand-edited, and deliberately conservative. Currency comes from
+# the live feeds (catalog.trending — Hugging Face's GGUF trending list, and
+# catalog.check_updates — Ollama's registry manifests). Any tag here, and
+# any hf.co/<org>/<repo>[:<quant>] tag from the trending feed, is pullable
+# from the Models page.
+updated: 2026-09-15
+note: >
+  Seed list, curated by hand. Treat the Hugging Face trending feed and the
+  Ollama registry as the source of truth for what is newest; treat this
+  file as the source of truth for what is worth keeping. Sizes are
+  approximate download sizes at the default quantization.
+
+models:
+  - name: qwen2.5
+    org: Alibaba (Qwen)
+    family: qwen2
+    category: general
+    description: Strong general model with reliable tool calling; this app's default.
+    license: Apache-2.0
+    capabilities: [tools]
+    recommended: true
+    ollama_tags:
+      - {tag: "qwen2.5:7b", size: "4.7 GB"}
+      - {tag: "qwen2.5:14b", size: "9.0 GB"}
+      - {tag: "qwen2.5:32b", size: "20 GB"}
+      - {tag: "qwen2.5:72b", size: "47 GB"}
+    hf_repo: Qwen/Qwen2.5-7B-Instruct-GGUF
+    notes: 3B and 72B are Qwen Research licensed; 7B/14B/32B are Apache-2.0.
+
+  - name: qwen2.5-coder
+    org: Alibaba (Qwen)
+    family: qwen2
+    category: coding
+    description: Code-specialized Qwen 2.5; excellent local coding model.
+    license: Apache-2.0
+    capabilities: [tools]
+    recommended: true
+    ollama_tags:
+      - {tag: "qwen2.5-coder:7b", size: "4.7 GB"}
+      - {tag: "qwen2.5-coder:14b", size: "9.0 GB"}
+      - {tag: "qwen2.5-coder:32b", size: "20 GB"}
+    hf_repo: Qwen/Qwen2.5-Coder-7B-Instruct-GGUF
+
+  - name: qwen3
+    org: Alibaba (Qwen)
+    family: qwen3
+    category: reasoning
+    description: Qwen 3 hybrid thinking/non-thinking models; dense and MoE sizes, tool calling.
+    license: Apache-2.0
+    capabilities: [tools, reasoning]
+    recommended: true
+    ollama_tags:
+      - {tag: "qwen3:8b", size: "5.2 GB"}
+      - {tag: "qwen3:14b", size: "9.3 GB"}
+      - {tag: "qwen3:30b", size: "19 GB"}
+      - {tag: "qwen3:32b", size: "20 GB"}
+    hf_repo: Qwen/Qwen3-8B-GGUF
+    notes: qwen3:30b is the 30B-A3B mixture-of-experts — fast for its quality.
+
+  - name: qwen3-coder
+    org: Alibaba (Qwen)
+    family: qwen3
+    category: coding
+    description: Agentic coding model from the Qwen 3 generation.
+    license: Apache-2.0
+    capabilities: [tools]
+    recommended: true
+    ollama_tags:
+      - {tag: "qwen3-coder:30b", size: "19 GB"}
+    hf_repo: Qwen/Qwen3-Coder-30B-A3B-Instruct-GGUF
+
+  - name: llama3.1
+    org: Meta
+    family: llama
+    category: general
+    description: Llama 3.1 — widely supported, tool calling, 128k context.
+    license: Llama-3.1-Community
+    capabilities: [tools]
+    recommended: true
+    ollama_tags:
+      - {tag: "llama3.1:8b", size: "4.9 GB"}
+      - {tag: "llama3.1:70b", size: "43 GB"}
+    hf_repo: bartowski/Meta-Llama-3.1-8B-Instruct-GGUF
+
+  - name: llama3.2
+    org: Meta
+    family: llama
+    category: small
+    description: Small Llama 3.2 models for fast, low-memory use.
+    license: Llama-3.2-Community
+    capabilities: [tools]
+    recommended: true
+    ollama_tags:
+      - {tag: "llama3.2:1b", size: "1.3 GB"}
+      - {tag: "llama3.2:3b", size: "2.0 GB"}
+    hf_repo: bartowski/Llama-3.2-3B-Instruct-GGUF
+
+  - name: llama3.3
+    org: Meta
+    family: llama
+    category: general
+    description: Llama 3.3 70B — Llama 3.1 405B-class quality at 70B.
+    license: Llama-3.3-Community
+    capabilities: [tools]
+    recommended: false
+    ollama_tags:
+      - {tag: "llama3.3:70b", size: "43 GB"}
+    hf_repo: bartowski/Llama-3.3-70B-Instruct-GGUF
+
+  - name: llama4
+    org: Meta
+    family: llama4
+    category: general
+    description: Llama 4 Scout / Maverick — natively multimodal mixture-of-experts models.
+    license: Llama-4-Community
+    capabilities: [tools, vision]
+    recommended: false
+    ollama_tags:
+      - {tag: "llama4:scout", size: "67 GB"}
+      - {tag: "llama4:maverick", size: "245 GB"}
+    hf_repo: unsloth/Llama-4-Scout-17B-16E-Instruct-GGUF
+    notes: Very large downloads; worth vaulting only with the disk to match.
+
+  - name: deepseek-r1
+    org: DeepSeek
+    family: deepseek
+    category: reasoning
+    description: DeepSeek R1 reasoning models; the Ollama tags below are the Qwen/Llama distills plus the full 671B.
+    license: MIT
+    capabilities: [reasoning]
+    recommended: true
+    ollama_tags:
+      - {tag: "deepseek-r1:8b", size: "5.2 GB"}
+      - {tag: "deepseek-r1:14b", size: "9.0 GB"}
+      - {tag: "deepseek-r1:32b", size: "20 GB"}
+      - {tag: "deepseek-r1:70b", size: "43 GB"}
+    hf_repo: unsloth/DeepSeek-R1-Distill-Qwen-14B-GGUF
+    notes: Distills do not reliably tool-call; use them for reasoning steps, not agentic roles.
+
+  - name: deepseek-v3
+    org: DeepSeek
+    family: deepseek
+    category: general
+    description: DeepSeek V3 — 671B MoE general model (MIT weights).
+    license: MIT
+    capabilities: [tools]
+    recommended: false
+    ollama_tags:
+      - {tag: "deepseek-v3:671b", size: "404 GB"}
+    hf_repo: unsloth/DeepSeek-V3-0324-GGUF
+    notes: Datacenter-scale; listed so it can be vaulted, not run, on a workstation.
+
+  - name: mistral
+    org: Mistral AI
+    family: mistral
+    category: general
+    description: Mistral 7B Instruct — fast, tool-calling capable.
+    license: Apache-2.0
+    capabilities: [tools]
+    recommended: true
+    ollama_tags:
+      - {tag: "mistral:7b", size: "4.1 GB"}
+    hf_repo: bartowski/Mistral-7B-Instruct-v0.3-GGUF
+
+  - name: mistral-small
+    org: Mistral AI
+    family: mistral
+    category: general
+    description: Mistral Small 3.x (24B) — strong mid-size model with vision and tool calling.
+    license: Apache-2.0
+    capabilities: [tools, vision]
+    recommended: true
+    ollama_tags:
+      - {tag: "mistral-small:24b", size: "14 GB"}
+    hf_repo: bartowski/Mistral-Small-3.1-24B-Instruct-2503-GGUF
+
+  - name: mixtral
+    org: Mistral AI
+    family: mixtral
+    category: general
+    description: Mixtral 8x7B / 8x22B sparse mixture-of-experts.
+    license: Apache-2.0
+    capabilities: [tools]
+    recommended: false
+    ollama_tags:
+      - {tag: "mixtral:8x7b", size: "26 GB"}
+      - {tag: "mixtral:8x22b", size: "80 GB"}
+    hf_repo: TheBloke/Mixtral-8x7B-Instruct-v0.1-GGUF
+
+  - name: devstral
+    org: Mistral AI
+    family: mistral
+    category: coding
+    description: Devstral — agentic coding model built for software-engineering agents.
+    license: Apache-2.0
+    capabilities: [tools]
+    recommended: true
+    ollama_tags:
+      - {tag: "devstral:24b", size: "14 GB"}
+    hf_repo: mistralai/Devstral-Small-2505_gguf
+
+  - name: gemma2
+    org: Google
+    family: gemma2
+    category: general
+    description: Gemma 2 — strong general model; no native tool calling.
+    license: Gemma-Terms
+    capabilities: []
+    recommended: false
+    ollama_tags:
+      - {tag: "gemma2:9b", size: "5.4 GB"}
+      - {tag: "gemma2:27b", size: "16 GB"}
+    hf_repo: bartowski/gemma-2-9b-it-GGUF
+
+  - name: gemma3
+    org: Google
+    family: gemma3
+    category: general
+    description: Gemma 3 — multimodal (text + image) from 1B to 27B, 128k context.
+    license: Gemma-Terms
+    capabilities: [vision]
+    recommended: true
+    ollama_tags:
+      - {tag: "gemma3:4b", size: "3.3 GB"}
+      - {tag: "gemma3:12b", size: "8.1 GB"}
+      - {tag: "gemma3:27b", size: "17 GB"}
+    hf_repo: unsloth/gemma-3-12b-it-GGUF
+    notes: Tool calling is prompt-based, not native — not advertised as tool-capable by Ollama.
+
+  - name: phi4
+    org: Microsoft
+    family: phi3
+    category: reasoning
+    description: Phi-4 14B — small model with strong math/reasoning.
+    license: MIT
+    capabilities: []
+    recommended: true
+    ollama_tags:
+      - {tag: "phi4:14b", size: "9.1 GB"}
+    hf_repo: bartowski/phi-4-GGUF
+
+  - name: phi4-mini
+    org: Microsoft
+    family: phi3
+    category: small
+    description: Phi-4 mini 3.8B — small, tool-calling capable.
+    license: MIT
+    capabilities: [tools]
+    recommended: false
+    ollama_tags:
+      - {tag: "phi4-mini:3.8b", size: "2.5 GB"}
+    hf_repo: bartowski/Phi-4-mini-instruct-GGUF
+
+  - name: glm4
+    org: Zhipu AI
+    family: glm4
+    category: general
+    description: GLM-4 9B — bilingual general model with tool calling.
+    license: GLM-4
+    capabilities: [tools]
+    recommended: false
+    ollama_tags:
+      - {tag: "glm4:9b", size: "5.5 GB"}
+    hf_repo: bartowski/glm-4-9b-chat-GGUF
+
+  - name: gpt-oss
+    org: OpenAI
+    family: gptoss
+    category: reasoning
+    description: gpt-oss — OpenAI's open-weight reasoning models (20B and 120B MoE), Apache-2.0.
+    license: Apache-2.0
+    capabilities: [tools, reasoning]
+    recommended: true
+    ollama_tags:
+      - {tag: "gpt-oss:20b", size: "13 GB"}
+      - {tag: "gpt-oss:120b", size: "65 GB"}
+    hf_repo: ggml-org/gpt-oss-20b-GGUF
+
+  - name: command-r
+    org: Cohere
+    family: command-r
+    category: general
+    description: Command R — retrieval-augmented generation and tool use focused.
+    license: CC-BY-NC-4.0
+    capabilities: [tools]
+    recommended: false
+    ollama_tags:
+      - {tag: "command-r:35b", size: "19 GB"}
+    hf_repo: bartowski/c4ai-command-r-v01-GGUF
+    notes: Non-commercial license.
+
+  - name: llava
+    org: LLaVA
+    family: llama
+    category: vision
+    description: LLaVA — image understanding on a Llama/Vicuna base.
+    license: Apache-2.0
+    capabilities: [vision]
+    recommended: false
+    ollama_tags:
+      - {tag: "llava:7b", size: "4.7 GB"}
+      - {tag: "llava:13b", size: "8.0 GB"}
+    hf_repo: ""
+
+  - name: qwen2.5vl
+    org: Alibaba (Qwen)
+    family: qwen25vl
+    category: vision
+    description: Qwen 2.5 VL — strong open vision-language model (documents, charts, screenshots).
+    license: Apache-2.0
+    capabilities: [vision]
+    recommended: true
+    ollama_tags:
+      - {tag: "qwen2.5vl:7b", size: "6.0 GB"}
+      - {tag: "qwen2.5vl:32b", size: "21 GB"}
+    hf_repo: ""
+
+  - name: nomic-embed-text
+    org: Nomic
+    family: nomic-bert
+    category: embedding
+    description: Embedding model used for this app's document search.
+    license: Apache-2.0
+    capabilities: [embedding]
+    recommended: true
+    ollama_tags:
+      - {tag: "nomic-embed-text:latest", size: "274 MB"}
+    hf_repo: nomic-ai/nomic-embed-text-v1.5-GGUF
+
+  - name: mxbai-embed-large
+    org: Mixedbread
+    family: bert
+    category: embedding
+    description: Large embedding model; alternative to nomic-embed-text.
+    license: Apache-2.0
+    capabilities: [embedding]
+    recommended: false
+    ollama_tags:
+      - {tag: "mxbai-embed-large:latest", size: "670 MB"}
+    hf_repo: mixedbread-ai/mxbai-embed-large-v1
+
+  - name: smollm2
+    org: Hugging Face
+    family: llama
+    category: small
+    description: SmolLM2 — tiny models (135M–1.7B) for tests and low-power devices.
+    license: Apache-2.0
+    capabilities: []
+    recommended: false
+    ollama_tags:
+      - {tag: "smollm2:135m", size: "270 MB"}
+      - {tag: "smollm2:1.7b", size: "1.8 GB"}
+    hf_repo: HuggingFaceTB/SmolLM2-1.7B-Instruct-GGUF
