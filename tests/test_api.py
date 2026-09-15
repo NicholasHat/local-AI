@@ -10,6 +10,7 @@ import config
 import conversations
 import ollama_client
 import server
+import settings
 import skills
 import vectorstore
 
@@ -18,7 +19,7 @@ import vectorstore
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(conversations, "CONVERSATIONS_DIR", tmp_path / "conversations")
     monkeypatch.setattr(server, "_active_conversation_id", None)
-    monkeypatch.setattr(server, "_selected_model", None)
+    monkeypatch.setattr(settings, "SETTINGS_PATH", tmp_path / "settings.json")
     return TestClient(server.app)
 
 
@@ -491,3 +492,42 @@ def test_static_mount_serves_built_frontend_without_shadowing_api(client):
     api = client.get("/api/health")
     assert api.status_code == 200
     assert set(api.json()) == {"healthy", "model"}
+
+
+def test_delete_model_clears_dangling_chat_override(client, monkeypatch):
+    monkeypatch.setattr(ollama_client, "list_models", lambda: _FAKE_MODELS)
+    monkeypatch.setattr(ollama_client, "delete_model", lambda name: None)
+    client.post("/api/settings/model", json={"model": "qwen2.5:latest"})
+    assert settings.get("chat_model") == "qwen2.5:latest"
+    assert client.delete("/api/models/qwen2.5:latest").status_code == 200
+    assert settings.get("chat_model") is None
+
+
+def test_delete_model_accepts_slashed_hf_names(client, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        ollama_client, "delete_model", lambda name: seen.setdefault("name", name)
+    )
+    assert client.delete("/api/models/hf.co/org/repo:Q4_K_M").status_code == 200
+    assert seen["name"] == "hf.co/org/repo:Q4_K_M"
+
+
+def test_chat_degrades_to_no_tools_for_models_without_tool_support(client, monkeypatch):
+    import providers
+
+    captured = {}
+
+    def fake_run(message, conversation, model=None, **kwargs):
+        captured["tools"] = kwargs.get("tools")
+        conversation.add_user(message)
+        return "plain answer"
+
+    monkeypatch.setattr(ollama_client, "health_check", lambda: True)
+    monkeypatch.setattr(providers, "tool_capable_models", lambda: {"other:latest"})
+    monkeypatch.setattr(server.agent, "run", fake_run)
+    monkeypatch.setenv("OLLAMA_MODEL", "gemma2")
+    assert (
+        client.post("/api/chat", json={"message": "hi"}).json()["reply"]
+        == "plain answer"
+    )
+    assert captured["tools"] == []

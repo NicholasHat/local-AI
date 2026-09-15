@@ -26,10 +26,19 @@ import config
 import conversations
 import ingest
 import ollama_client
+import providers
 import runs
+import settings
 import skills
 import vectorstore
 import worktree
+from api import bench as bench_api
+from api import jobs as jobs_api
+from api import models as models_api
+from api import projects as projects_api
+from api import providers as providers_api
+from api import spaces as spaces_api
+from api import workflows as workflows_api
 from memory import Conversation
 
 app = FastAPI(title="Local AI Assistant API")
@@ -42,7 +51,6 @@ app.add_middleware(
 )
 
 _active_conversation_id: str | None = None
-_selected_model: str | None = None  # None = use config.get_model()'s default
 
 
 def _active_id() -> str:
@@ -60,12 +68,9 @@ def _get_conversation() -> Conversation:
 
 
 def _active_model() -> str | None:
-    if _selected_model:
-        return _selected_model
-    try:
-        return config.get_model()
-    except RuntimeError:
-        return None
+    """The chat model: session override -> active provider -> env default
+    (providers.resolve is the one resolution order for the whole app)."""
+    return providers.resolve("chat")
 
 
 class HealthResponse(BaseModel):
@@ -143,7 +148,9 @@ def list_models() -> ModelsResponse:
 
 @app.post("/api/settings/model", response_model=ModelsResponse)
 def set_model(request: SetModelRequest) -> ModelsResponse:
-    global _selected_model
+    """Pick the chat model for this session (persisted in settings.json,
+    overriding the active provider's chat route until a provider is
+    activated again)."""
     infos = _model_infos()
     match = next((m for m in infos if m.name == request.model), None)
     if match is None:
@@ -153,60 +160,12 @@ def set_model(request: SetModelRequest) -> ModelsResponse:
             status_code=400,
             detail=f"{request.model!r} doesn't support tool calling.",
         )
-    _selected_model = request.model
-    return ModelsResponse(models=infos, current=_selected_model)
-
-
-# A small curated list of recommended tags — Ollama has no public model
-# search API, so this is hand-maintained, not a live catalog. Any tag can
-# still be pulled directly via POST /api/models/pull regardless of this list.
-_MODEL_LIBRARY = [
-    {
-        "name": "qwen2.5",
-        "description": "Strong tool-calling, good general default.",
-        "tool_capable": True,
-    },
-    {
-        "name": "llama3.1",
-        "description": "Meta's Llama 3.1 — tool-calling capable, widely used.",
-        "tool_capable": True,
-    },
-    {
-        "name": "mistral",
-        "description": "Fast 7B model, tool-calling capable.",
-        "tool_capable": True,
-    },
-    {
-        "name": "gemma2",
-        "description": "Google's Gemma 2 — strong general-purpose, no tool-calling.",
-        "tool_capable": False,
-    },
-    {
-        "name": "phi3",
-        "description": "Small and fast, no tool-calling.",
-        "tool_capable": False,
-    },
-    {
-        "name": "nomic-embed-text",
-        "description": "Embedding model used for this app's document search.",
-        "tool_capable": False,
-    },
-]
-
-
-class ModelLibraryEntry(BaseModel):
-    name: str
-    description: str
-    tool_capable: bool
+    settings.update(chat_model=request.model)
+    return ModelsResponse(models=infos, current=request.model)
 
 
 class PullModelRequest(BaseModel):
     name: str
-
-
-@app.get("/api/models/library", response_model=list[ModelLibraryEntry])
-def model_library() -> list[ModelLibraryEntry]:
-    return [ModelLibraryEntry(**m) for m in _MODEL_LIBRARY]
 
 
 @app.post("/api/models/pull")
@@ -229,15 +188,6 @@ def pull_model(request: PullModelRequest) -> StreamingResponse:
             yield f"data: {json.dumps({'status': 'error', 'error': str(exc)})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-
-@app.delete("/api/models/{name}")
-def delete_model_endpoint(name: str) -> dict:
-    try:
-        ollama_client.delete_model(name)
-    except Exception as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {"status": "ok"}
 
 
 @app.get("/api/conversation")
@@ -322,8 +272,22 @@ def chat(request: ChatRequest) -> ChatResponse:
 
     conversation_id = _active_id()
     conversation = conversations.load(conversation_id)
-    reply = agent.run(request.message, conversation, model=_selected_model)
+    model = _active_model()
+    # A provider may route chat to a model that can't call tools (Ollama
+    # rejects tool schemas for those outright). Degrade to a plain chat
+    # turn rather than failing every message — the Providers panel warns
+    # about such routes, and the model can still answer.
+    tools = None if providers.supports_tools(model) else []
+    reply = agent.run(
+        request.message,
+        conversation,
+        model=model,
+        tools=tools,
+        options=providers.resolve_options("chat"),
+        context=projects_api.chat_context(),
+    )
     conversations.save(conversation_id, conversation)
+    projects_api.link_conversation(conversation_id)
     return ChatResponse(reply=reply)
 
 
@@ -573,6 +537,20 @@ def discard_coding_run(run_id: str) -> CodingRunResponse:
     except (ValueError, worktree.WorktreeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _coding_run_response(meta)
+
+
+# Domain routers (plan.md decision 10, Phases 19–26) — one per new domain,
+# included before the static mount below, which must stay last.
+for router in (
+    jobs_api.router,
+    models_api.router,
+    providers_api.router,
+    spaces_api.router,
+    bench_api.router,
+    workflows_api.router,
+    projects_api.router,
+):
+    app.include_router(router)
 
 
 # Serve the built React app, if present. Must be mounted LAST — Starlette

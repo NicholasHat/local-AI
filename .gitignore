@@ -13,3 +13,9 @@ chroma/
 uploads/
 conversations/
 runs/
+jobs/
+spaces/
+bench_results/
+projects/
+providers/
+settings.json
