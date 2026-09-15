@@ -4,6 +4,19 @@ A local, private assistant built on Ollama with a tool-calling agent loop, PDF
 read/fill tools, and RAG over local documents. No cloud APIs. See `CLAUDE.md`
 for the pinned stack and hard rules — this plan sequences the build.
 
+**Status (2026-09-15): Phases 1–17 and 19–26 complete.** The model-sovereignty
+expansion (Phases 19–26) is built and verified: job store + settings +
+client/agent seams, shared spaces, providers (with benchmark-driven
+recommendation), a deterministic benchmark suite + arena, YAML workflows
+(`research`, `council`, `project-brief`) run through the chat loop with tool
+allowlists, projects, and the catalog / trending / update-check / vault /
+custom-model layer — each with an `api/<domain>.py` router, a page in the
+React app, mocked unit tests (345 total), and live E2E tests behind the `e2e`
+marker. Verified live on 2026-09-15: vault export → delete → import → chat
+round trip (no Ollama restart needed), registry update check, HF trending
+pulls, a two-model council whose synthesis named which model held which
+view, and an arena with a judge verdict. Earlier status follows.
+
 **Status (2026-07-30): Phases 1–17 complete.** Plus a Perplexity-style React
 redesign (denim-blue/gray/white theme, autosizing composer, inline model
 picker, a standalone Skills page, and a tool-activity log panel — not
@@ -16,7 +29,7 @@ throwaway `git worktree` via a live step log, then Approve or Discard the
 diff. The Streamlit UI (Phase 6) has been fully cut over and removed (Phase
 12). See each phase's "Done when" line for what was verified.
 
-**Phase 18 below is planned (2026-07-23), not yet built** — a multi-agent
+**Phase 18 below is planned (2026-07-23), not yet built; Phases 19–26 (planned and built 2026-09-15) are the model-sovereignty expansion** — a multi-agent
 writer/tester/security-reviewer variant layered on the Phase 16–17 coding
 agent machinery.
 
@@ -717,6 +730,204 @@ implementation.
 by the tester (tests actually ran — pass or an honestly-reported failure), and
 reviewed by the security role with findings attached, all in one run log,
 still gated behind a single human approval before it can touch a real branch.
+
+---
+
+## Key decisions for Phases 19–26 (planned 2026-09-15) — model sovereignty
+
+The brief: if today's frontier models go private or open weights become
+subscription-gated, this app must already hold every model worth having,
+and be able to *use* them well — agentic workflows, research, projects,
+model-to-model collaboration, comparisons, and a way to compose the
+strongest local "provider" out of whatever is installed. All of it offline
+by default; the network is only ever used to *discover and fetch* models
+and public pages, never to run inference.
+
+1. **One generic job store for every new long-running thing.** Benchmarks,
+   arena comparisons, and workflow runs all need "start on a background
+   thread, append events as they happen, poll/SSE them, persist the final
+   result". `jobstore.py` owns that once (`jobs/<kind>/<id>.json`, atomic
+   writes, the same lock+`os.replace` discipline as `runs.py`) and one SSE
+   route (`/api/jobs/{kind}/{id}/events`) serves all of them. `runs.py` stays
+   as the coding-run store — it works and carries coding-specific fields;
+   it is not refactored onto the new primitive.
+
+2. **Workflows are YAML files, executed by the *chat* agent loop with a
+   restricted tool list — never the coding loop.** `workflows/<name>.yaml`
+   declares steps (prompt template, provider role or explicit model, allowed
+   tools, `depends_on`, optional `each:` fan-out over a list input). The
+   runner builds a fresh `Conversation` per step and calls `agent.run()`
+   with `tools=[...]` — so a workflow step can only ever reach the tools
+   `agent.py` already exposes to chat (documents, search, web, spaces,
+   skills). The coding agent's write/exec tools remain structurally
+   unreachable from any workflow, exactly as they are from chat.
+
+3. **A shared communication space is the substrate for model-to-model
+   communication, not a special multi-agent protocol.** `spaces.py` is a
+   persisted, append-only board (`spaces/<id>.json`, posts with author +
+   timestamp). Two ordinary chat tools — `read_space` / `post_to_space` —
+   let any agent, in any workflow step or chat turn, read what others wrote
+   and reply. Every workflow run gets its own space, and the runner
+   auto-posts each step's final output there, so the space *is* the
+   inter-model transcript, and a human can read it live or post into it.
+   "Council" (several models answer, one synthesizes) is just a workflow
+   that fans out over models and reads the space — no new engine.
+
+4. **Providers are named routing profiles; "strongest" is computed from
+   measurements, not vibes.** `providers/<name>.yaml` maps roles (`chat`,
+   `coding`, `research`, `judge`, `fast`, `embedding`) to models + options.
+   `providers.recommend()` builds one from benchmark results: best measured
+   score per category among *installed* models, with tool-capable models
+   required for agentic roles. Resolution order everywhere a model is
+   needed: explicit request override → session chat override → active
+   provider's route → env default (`OLLAMA_MODEL` / `OLLAMA_EMBED_MODEL`).
+   The "never hardcode the model" rule survives — it just gets a richer,
+   still-configurable source.
+
+5. **Benchmarks are a small local eval suite with deterministic checkers.**
+   `benchmarks/suite.yaml` holds tasks tagged by category (reasoning, coding,
+   instruction, tools, json, knowledge) each with a mechanical check
+   (contains / regex / number / tool-called / valid-json). No LLM judge in
+   the suite itself, so scores are reproducible offline; a judge model is
+   used only in the ad-hoc **arena** (same prompt → N models side by side)
+   where a reasoned 1–10 verdict is what the user actually wants to read.
+   Speed (eval tokens/sec, load time) is recorded alongside accuracy —
+   `ollama_client.chat_stats()` exposes the response metrics that `chat()`
+   discards.
+
+6. **The catalog is a seed plus live feeds — never a frozen list.**
+   `catalog.yaml` is a checked-in, curated map of open-weight families
+   (license, sizes, capabilities, Ollama tag, Hugging Face repo). It is
+   deliberately editable and dated. Currency comes from two network calls,
+   both optional and degrading cleanly offline: Hugging Face's public
+   trending-GGUF feed (pullable directly as `hf.co/<repo>:<quant>` — Ollama
+   supports that natively, so nothing is limited to Ollama's own library),
+   and Ollama's registry manifests for "is there a newer build of an
+   installed tag" (remote digest ≠ local manifest → update available).
+
+7. **The vault is the actual insurance policy.** Ollama stores models as a
+   manifest + content-addressed blobs under `~/.ollama/models`. `vault.py`
+   copies a model's manifest and every referenced blob into a plain
+   directory (an external drive, a NAS) and can restore them, with no
+   registry involved. A model that's been vaulted survives its upstream
+   being pulled, relicensed, or paywalled. Custom builds (`ollama create`
+   from a base + system prompt + parameters via `ollama_client.create_model`)
+   vault the same way.
+
+8. **Projects group, they don't fork the store.** A project
+   (`projects/<id>.json`) is a goal + notes + links: attached document
+   filenames, conversation ids, workflow/arena/bench run ids, its own
+   space. Documents stay in the one Chroma collection; an active project
+   just *filters* `search_documents` to its attached sources
+   (`vectorstore.query(..., sources=[...])`) and prepends its goal/notes to
+   the chat's system context. No per-project collections, no upload-dir
+   restructuring.
+
+9. **Settings that must outlive a restart move to `settings.json`.** Active
+   provider, active project, and the chat-model override were module-level
+   globals; with providers and projects they're real user state and belong
+   on disk (`settings.py`, same file-based posture as everything else).
+
+10. **`api/` routers, one per new domain.** `server.py` was 585 lines of
+    routes; the new domains each get an `APIRouter` in `api/<domain>.py`
+    that `server.py` includes *before* the static mount (which must stay
+    last). Existing routes stay where they are.
+
+## Phase 19 — Spine: job store, settings, client + agent seams
+
+- `jobstore.py` — generic background-job records (decision 1).
+- `settings.py` — `settings.json` accessors (decision 9); `server.py`'s
+  `_selected_model` becomes `settings.get("chat_model")`.
+- `ollama_client.py` — `chat(..., options=)`, `chat_stats()` (message +
+  metrics), `show_model()` (normalized details: family, parameter size,
+  quantization, context length, license, capabilities, digest),
+  `create_model()`, `running_models()`.
+- `agent.py` — `run(..., tools=None, options=None, context=None)`: an
+  allowlist of tool names, per-call options, and a `RunContext`
+  (agent identity for space posts, document-source filter). New tools:
+  `read_space`, `post_to_space`, `web_search`, `fetch_url` (`tools/web.py`,
+  stdlib only, disabled by `ENABLE_WEB_TOOLS=false`).
+- `vectorstore.query(..., sources=)` + `doc_search.search(..., sources=)`.
+
+**Done when:** all existing tests still pass, and a mocked test proves
+`tools=[...]` restricts what's advertised and `context.doc_sources` reaches
+the vector query.
+
+## Phase 20 — Shared spaces
+
+`spaces.py` (decision 3) + `api/spaces.py` (list/create/get/post/delete) +
+a Spaces page (board view, live-refreshing, human can post). **Done when:**
+two chat turns with different `agent_name`s can converse through a space
+and the page shows both.
+
+## Phase 21 — Providers
+
+`providers.py` (decision 4) with built-in `default` (env-only) and
+`recommend()`; `api/providers.py` (CRUD, activate, recommend). Chat, coding
+runs, workflows, and the arena judge all resolve their model via
+`providers.resolve(role)`. **Done when:** switching the active provider
+changes which model answers a chat and which model a coding run uses,
+without touching `.env`.
+
+## Phase 22 — Benchmarks and arena (comparisons)
+
+`bench.py` + `benchmarks/suite.yaml` (decision 5); `api/bench.py`
+(start bench, results, leaderboard, arena start/get). Compare page: a
+leaderboard table (per-category scores + tok/s) and an arena (prompt, pick
+models, side-by-side answers with timing, optional judge verdicts).
+**Done when:** running the suite on two installed models yields two result
+files, the leaderboard ranks them, `providers.recommend()` picks the
+winner per role, and an arena run shows both answers with a judge score.
+
+## Phase 23 — Workflows
+
+`workflows.py` (decision 2) + built-in definitions: `research` (plan →
+gather via docs/web → draft → critique → revise), `council` (fan-out over
+models → synthesize from the space), `project-brief`. `api/workflows.py`
+(list definitions, start run, get run, list runs) on the job store.
+Workflows page: pick a workflow, fill inputs, watch steps stream, read the
+final output, open the run's space. **Done when:** `council` over two
+installed models produces a synthesized answer whose space shows every
+voice, and `research` produces a cited report from attached documents.
+
+## Phase 24 — Projects
+
+`projects.py` (decision 8) + `api/projects.py`; Projects page (goal, notes
+editor, attached documents, linked conversations/runs, "save this output
+to notes"). **Done when:** activating a project scopes `search_documents`
+to its documents (a question answered only by an unattached document
+returns nothing) and its notes appear in the chat's context.
+
+## Phase 25 — Catalog, updates, vault, custom models
+
+`catalog.py` + `catalog.yaml` (decision 6) replacing `server.py`'s
+`_MODEL_LIBRARY`; `vault.py` (decision 7); `api/models.py` (installed
+details, catalog, trending, update check, vault export/import/list,
+create custom model). Models page: Installed (full details), Catalog &
+Updates, Vault, Build (base + system prompt + params → new local model).
+**Done when:** an installed model exports to the vault directory, deletes
+from Ollama, and imports back and chats; the update check flags a stale
+tag; a trending HF GGUF pulls via `hf.co/...`.
+
+## Phase 26 — Integration, docs, tests
+
+Sidebar navigation for the new pages, `README`/`CLAUDE.md` updates,
+unit tests for every new module (mocked client; real Chroma in tmp), one
+E2E per phase behind the `e2e` marker.
+
+**Done (2026-09-15).** Notes from the build worth keeping:
+- Workflow steps whose model can't call tools run without their allowlist
+  (reported as `tools_dropped` on the step event) instead of failing the
+  run — Ollama rejects tool schemas for such models outright, and a council
+  should be able to include small models.
+- A model occasionally returns an empty reply when tools are advertised
+  (qwen2.5 + `read_space`); a blank step is retried once, then fails loudly.
+- DuckDuckGo's HTML endpoint rate-limits quickly; `web_search` falls back to
+  Wikipedia and names the backend. `SEARXNG_URL` is the robust option.
+- `tokens_per_sec` in the leaderboard is total eval tokens over total eval
+  seconds for the run, not a mean of per-task rates (tiny answers are
+  overhead-dominated).
+- The old ModelManager modal was removed in favor of the Models page.
 
 ---
 

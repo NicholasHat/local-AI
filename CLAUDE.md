@@ -1,8 +1,12 @@
 # Local AI Assistant
 
 ## Project
-Local Ollama-based assistant with chat, PDF tools, and RAG. No cloud APIs.
-See `plan.md` for current phase and task status. Read it at the start of every session.
+Local Ollama-based assistant with chat, PDF tools, RAG, agentic workflows,
+shared agent spaces, projects, model benchmarks/arena, provider routing, a
+model catalog + vault, and a sandboxed coding agent. No cloud AI APIs — the
+network is used only to discover/fetch models and read public pages, never
+for inference. See `plan.md` for current phase and task status. Read it at
+the start of every session.
 
 ## Stack
 - Python 3.11+ backend (FastAPI/uvicorn), React/TypeScript frontend (Vite + Tailwind, in `web/`)
@@ -30,12 +34,21 @@ ruff check . && ruff format .
 - Model name comes from env var `OLLAMA_MODEL` by default, overridable per-session via `POST /api/settings/model` — never hardcoded
 - Use `pathlib.Path` for all file I/O
 - Frontend HTTP calls go through `web/src/api.ts` — nowhere else (the frontend's version of the thin-wrapper rule)
+- **Model resolution** is `providers.resolve(role, override)` everywhere a model is needed (chat, coding, workflow steps, arena judge): explicit override → session chat override (`settings.json`) → active provider route → env default. Never read `OLLAMA_MODEL` directly outside `config.py`
+- **Workflows** (`workflows.py`, `workflows/<name>.yaml`) run steps through `agent.run(..., tools=[allowlist])` — they can only reach chat tools, never the coding loop. Inter-step/inter-model communication goes through a shared space (`spaces.py`) via the `read_space` / `post_to_space` chat tools; the runner auto-posts each step's output there
+- **Long-running work** (bench, arena, workflow runs) uses `jobstore.py` (`jobs/<kind>/<id>.json`) and is served by `api/jobs.py` (get + SSE events). Coding runs keep their own `runs.py`. New domains get an `APIRouter` in `api/<domain>.py`, included in `server.py` before the static mount
+- **Benchmarks are deterministic**: `benchmarks/suite.yaml` tasks have mechanical checks only; coding tasks are checked by shape/known output and never execute model output. A judge model is only used in the ad-hoc arena
+- **The vault** (`vault.py`) copies Ollama's manifest + blobs to a plain directory (`MODEL_VAULT_DIR`) and restores them without the registry — that is the insurance against upstream models disappearing. `catalog.yaml` is a dated seed; currency comes from the Hugging Face trending feed and registry manifest checks in `catalog.py`, both optional and offline-tolerant
+- Runtime state dirs are all gitignored file stores: `conversations/ runs/ jobs/ spaces/ projects/ providers/ bench_results/ settings.json`
 
 ## Gotchas
 - pypdf silently succeeds on non-form PDFs without writing — always call `get_fields()` first
 - ChromaDB returns distances not scores — lower = more similar, don't invert the sort
 - Tool call + result pairs in message history must be kept together — never trim one without the other
 - `server.py`'s static-file mount for `web/dist` must stay the LAST route registered — Starlette matches in registration order, and a `/` mount would shadow every `/api/*` route above it
+- Ollama durations (`total_duration`, `eval_duration`, ...) are nanoseconds; `list_models()`'s `digest` is sha256 of the local manifest bytes and the registry manifest endpoint returns those same bytes with no digest header — compare by hashing the body
+- DuckDuckGo's HTML endpoint rate-limits and serves a bot challenge readily; `tools/web.py` falls through to Wikipedia and reports which backend answered. Set `SEARXNG_URL` for robust search
+- Model names contain `:` and `/` (`hf.co/org/repo:Q4_K_M`) — API path params for them must use `{name:path}`
 
 ## Workflow
 
