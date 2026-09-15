@@ -1,0 +1,63 @@
+name: project-brief
+description: >-
+  Turn a one-line goal into a project brief: clarified scope, a phased plan,
+  risks, and a final brief ready to start from.
+inputs:
+  - name: goal
+    type: string
+    description: What you want to build or achieve, in a sentence or two.
+output: brief
+steps:
+  - id: clarify
+    name: Clarify scope
+    prompt: |
+      Goal: {inputs.goal}
+
+      Restate the goal precisely, then list: (a) what is explicitly in scope,
+      (b) what is out of scope, (c) the three most important assumptions you
+      are making, and (d) the single success criterion that would prove the
+      goal is met. Be concrete; do not ask questions — decide.
+
+  - id: plan
+    name: Phased plan
+    depends_on: [clarify]
+    prompt: |
+      Scope:
+      {steps.clarify.output}
+
+      Write a phased plan: 3-6 phases, each with a name, a one-line
+      objective, the concrete deliverables, and a "done when" check. Order
+      phases by dependency. Output only the plan.
+
+  - id: risks
+    name: Risks
+    role: judge
+    depends_on: [clarify, plan]
+    prompt: |
+      Scope:
+      {steps.clarify.output}
+
+      Plan:
+      {steps.plan.output}
+
+      List the five most likely ways this project fails or stalls. For each:
+      the risk, why it is likely here, an early warning sign, and a concrete
+      mitigation. Output only the numbered list.
+
+  - id: brief
+    name: Project brief
+    depends_on: [clarify, plan, risks]
+    prompt: |
+      Assemble a project brief in markdown from the material below, with the
+      sections: Goal, Scope, Success criterion, Plan, Risks, First three
+      actions. Keep everything concrete; tighten wording but do not drop
+      content. Output only the brief — no preamble.
+
+      Scope:
+      {steps.clarify.output}
+
+      Plan:
+      {steps.plan.output}
+
+      Risks:
+      {steps.risks.output}

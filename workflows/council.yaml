@@ -1,0 +1,46 @@
+name: council
+description: >-
+  Several models each answer the same question independently, then a judge
+  reads every voice in the shared space and synthesizes where they agree and
+  disagree.
+inputs:
+  - name: question
+    type: string
+    description: The question every model should answer.
+  - name: models
+    type: models
+    description: The installed models that form the council.
+output: synthesize
+steps:
+  - id: voice
+    name: Council voice
+    each: models
+    model: "{item}"
+    tools: [read_space]
+    prompt: |
+      Question: {inputs.question}
+
+      Answer the question as an expert would: state your position in the
+      first sentence, then give your three strongest reasons with concrete
+      specifics, then one honest caveat. Keep it under 250 words. Do not
+      hedge between options — commit to an answer.
+
+  - id: synthesize
+    name: Synthesize
+    role: judge
+    depends_on: [voice]
+    tools: [read_space]
+    prompt: |
+      Question put to the council: {inputs.question}
+
+      The council's answers (one per model):
+      {steps.voice.output}
+
+      Write a synthesis in markdown with these sections:
+      1. Consensus — what the voices agreed on.
+      2. Disagreements — where they differed, naming which model held which
+         view and why.
+      3. Verdict — the best-supported answer, in two or three sentences, and
+         which voice(s) it draws on most.
+      4. Strongest single answer — name the model whose answer was most
+         useful and say why in one sentence.

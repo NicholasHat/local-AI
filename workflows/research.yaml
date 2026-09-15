@@ -1,0 +1,91 @@
+name: research
+description: >-
+  Plan, gather evidence from attached documents and the web, draft, critique,
+  and revise — ending in a cited research report.
+inputs:
+  - name: topic
+    type: string
+    description: The question or subject to research.
+system: >-
+  You are part of a research pipeline. Be concrete, cite sources (document
+  names or URLs) for every factual claim, and never invent citations.
+output: revise
+steps:
+  - id: plan
+    name: Plan
+    role: research
+    prompt: |
+      Research topic: {inputs.topic}
+
+      Write a short research plan: 3-6 specific questions that, once answered,
+      would give a complete picture, and for each the kind of source most
+      likely to answer it (attached documents, official docs, news, papers).
+      Output only the numbered plan.
+
+  - id: gather
+    name: Gather evidence
+    role: research
+    depends_on: [plan]
+    tools: [search_documents, read_uploaded_document, web_search, fetch_url]
+    prompt: |
+      Research topic: {inputs.topic}
+
+      Plan:
+      {steps.plan.output}
+
+      Work through the plan. First search the attached documents
+      (search_documents) for each question; then use web_search and fetch_url
+      for what the documents do not answer. Collect the evidence as a list of
+      findings, each as: the finding, then "Source:" with the document name or
+      URL. Include direct quotes where they matter. If a tool fails or finds
+      nothing, say so for that question instead of guessing. Output only the
+      findings list.
+
+  - id: draft
+    name: Draft report
+    role: research
+    depends_on: [gather]
+    prompt: |
+      Research topic: {inputs.topic}
+
+      Evidence:
+      {steps.gather.output}
+
+      Write a research report in markdown: a 3-sentence summary, then a
+      section per question from the plan with the answer and inline citations
+      in the form [source], then "Open questions" for anything unresolved, and
+      finally a "Sources" list. Use only the evidence above.
+
+  - id: critique
+    name: Critique
+    role: judge
+    depends_on: [draft, gather]
+    prompt: |
+      You are reviewing a research report before publication.
+
+      Evidence the writer had:
+      {steps.gather.output}
+
+      Draft:
+      {steps.draft.output}
+
+      List concrete problems: claims not supported by the evidence, missing
+      citations, contradictions, unclear sections, and anything important the
+      evidence covers that the draft omits. Number each problem and quote the
+      offending passage. If the draft is sound, say "No blocking problems" and
+      list at most three improvements.
+
+  - id: revise
+    name: Revise
+    role: research
+    depends_on: [draft, critique]
+    prompt: |
+      Revise the report below to address every point in the critique. Keep the
+      same structure, keep every citation, and do not add claims that are not
+      in the draft's cited evidence. Output only the final report in markdown.
+
+      Critique:
+      {steps.critique.output}
+
+      Draft:
+      {steps.draft.output}
