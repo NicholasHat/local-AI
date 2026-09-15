@@ -16,25 +16,57 @@ skills/<name>/, discovered fresh each turn and dispatched via the one
 `get_time` is the original skeleton tool; the pdf/doc tools are the real ones.
 """
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
+import config
 import ollama_client
 import skills
+import spaces
 from memory import Conversation
-from tools import doc_search, pdf_filler, pdf_reader
+from tools import doc_search, pdf_filler, pdf_reader, web
 
 MAX_ITERATIONS = 8
 
 SYSTEM_PROMPT = (
-    "You are a helpful local assistant with tools for PDFs and documents. "
+    "You are a helpful local assistant with tools for PDFs, documents, the "
+    "web, and shared spaces. "
     "Documents the user uploads in the sidebar are already available to you: "
     "read a whole uploaded document with read_uploaded_document(filename), and "
     "answer specific questions across uploaded documents with search_documents. "
     "Use read_pdf / list_pdf_fields / fill_pdf only for files at a filesystem "
     "path the user explicitly gives you. Never ask the user for a file path to "
-    "a document they uploaded in the sidebar. Prefer tools over guessing, and "
-    "cite sources when answering from documents."
+    "a document they uploaded in the sidebar. Use web_search and fetch_url for "
+    "current events or facts not in the documents, and read_space / "
+    "post_to_space to collaborate with other agents through a shared space "
+    "when given a space id. Prefer tools over guessing, and cite sources when "
+    "answering from documents or the web."
 )
+
+# Tool names that reach the network (tools/web.py). Dropped from the
+# advertised set when config.web_tools_enabled() is False, so an offline
+# posture is a single env flag, not a code change.
+WEB_TOOL_NAMES = frozenset({"web_search", "fetch_url"})
+
+
+@dataclass
+class RunContext:
+    """Per-run facts the tools need that aren't in the user's message.
+
+    agent_name  — who a post_to_space post is attributed to (a workflow step
+                  posts as e.g. "critic @ llama3.1:latest"; chat posts as
+                  "assistant").
+    doc_sources — restrict search_documents to these uploaded filenames
+                  (an active project's attached documents); None = all.
+    system_context — extra system text sent with THIS request only (an
+                  active project's goal + notes). Never persisted into the
+                  conversation, so edits take effect next turn and history
+                  doesn't fill with stale copies.
+    """
+
+    agent_name: str = "assistant"
+    doc_sources: list[str] | None = None
+    system_context: str | None = None
 
 
 # --- Tools ---------------------------------------------------------------
@@ -194,11 +226,103 @@ TOOL_SCHEMAS = [
             ),
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": (
+                "Search the public web for current information. Returns "
+                "numbered results with title, URL, and snippet. Follow up with "
+                "fetch_url to read a result in full."
+            ),
+            "parameters": _obj(
+                {
+                    "query": {"type": "string", "description": "Search query."},
+                    "max_results": {
+                        "type": "integer",
+                        "description": "How many results (1-10, default 5).",
+                    },
+                },
+                ["query"],
+            ),
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_url",
+            "description": (
+                "Fetch a public web page (http/https) and return its visible "
+                "text, truncated. Use after web_search, or for a URL the user "
+                "gives you."
+            ),
+            "parameters": _obj(
+                {"url": {"type": "string", "description": "The page URL."}},
+                ["url"],
+            ),
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_space",
+            "description": (
+                "Read the latest posts in a shared communication space — a "
+                "board where other agents (and the user) post. Use it to see "
+                "what others have said before contributing."
+            ),
+            "parameters": _obj(
+                {
+                    "space_id": {"type": "string", "description": "The space id."},
+                    "limit": {
+                        "type": "integer",
+                        "description": "How many recent posts to read (default 30).",
+                    },
+                },
+                ["space_id"],
+            ),
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "post_to_space",
+            "description": (
+                "Post a message into a shared communication space so other "
+                "agents and the user can read it. Post conclusions, questions "
+                "for other agents, or findings — not scratch work."
+            ),
+            "parameters": _obj(
+                {
+                    "space_id": {"type": "string", "description": "The space id."},
+                    "content": {"type": "string", "description": "What to post."},
+                },
+                ["space_id", "content"],
+            ),
+        },
+    },
 ]
 
 
-def _execute_tool(name: str, args: dict) -> str:
+def available_tool_schemas(names: list[str] | None = None) -> list[dict]:
+    """Every tool the chat agent may advertise right now: the built-ins
+    (minus the web tools when they're disabled) plus the skills discovered
+    on disk this turn. `names` narrows that to an allowlist — how a workflow
+    step gets exactly the tools its definition grants (plan.md decision 2,
+    Phases 19–26). Unknown names are ignored, so a stale allowlist never
+    crashes a run; it just advertises less."""
+    schemas = TOOL_SCHEMAS + skills.tool_schemas()
+    if not config.web_tools_enabled():
+        schemas = [s for s in schemas if s["function"]["name"] not in WEB_TOOL_NAMES]
+    if names is None:
+        return schemas
+    wanted = set(names)
+    return [s for s in schemas if s["function"]["name"] in wanted]
+
+
+def _execute_tool(name: str, args: dict, context: RunContext | None = None) -> str:
     """The single tool dispatch point. Returns a string result for the model."""
+    context = context or RunContext()
     if name == "get_time":
         return _get_time()
     if name == "read_uploaded_document":
@@ -210,7 +334,9 @@ def _execute_tool(name: str, args: dict) -> str:
     if name == "fill_pdf":
         return pdf_filler.fill(args["input_path"], args["output_path"], args["values"])
     if name == "search_documents":
-        return doc_search.search(args["query"], args.get("n_results", 4))
+        return doc_search.search(
+            args["query"], args.get("n_results", 4), sources=context.doc_sources
+        )
     if name == "create_skill":
         return skills.create_instruction_skill(
             name=args["name"],
@@ -219,6 +345,15 @@ def _execute_tool(name: str, args: dict) -> str:
             required=args.get("required") or [],
             prompt=args["prompt"],
         )
+    if name == "web_search":
+        return web.search(args["query"], args.get("max_results", 5))
+    if name == "fetch_url":
+        return web.fetch(args["url"])
+    if name == "read_space":
+        return spaces.render(args["space_id"], args.get("limit", 30))
+    if name == "post_to_space":
+        entry = spaces.post(args["space_id"], context.agent_name, args["content"])
+        return f"Posted to space {args['space_id']} as {entry['author']}."
     if name.startswith("skill__"):
         return skills.execute(name, args)
     raise ValueError(f"Unknown tool: {name!r}")
@@ -227,18 +362,44 @@ def _execute_tool(name: str, args: dict) -> str:
 # --- Loop ----------------------------------------------------------------
 
 
-def run(user_message: str, conversation: Conversation, model: str | None = None) -> str:
+def _with_system_context(messages: list[dict], context: RunContext) -> list[dict]:
+    """The outgoing message list: history plus, when the context carries
+    system_context, one ephemeral system message right after the leading
+    system prompt (or first, if there is none)."""
+    if not context.system_context:
+        return messages
+    extra = {"role": "system", "content": context.system_context}
+    at = 1 if messages and messages[0].get("role") == "system" else 0
+    return messages[:at] + [extra] + messages[at:]
+
+
+def run(
+    user_message: str,
+    conversation: Conversation,
+    model: str | None = None,
+    *,
+    tools: list[str] | None = None,
+    options: dict | None = None,
+    context: RunContext | None = None,
+) -> str:
     """Run one user turn through the tool-calling loop; return the reply text.
 
     `conversation` (memory.py) is the source of truth and is mutated in place.
     `model` overrides the default (config.OLLAMA_MODEL) for this turn only.
+    `tools` is an allowlist of tool names (None = everything available),
+    `options` is passed through to Ollama (temperature, num_ctx, ...), and
+    `context` carries the per-run facts tools need (RunContext).
     """
     conversation.add_user(user_message)
-    tools = TOOL_SCHEMAS + skills.tool_schemas()
+    schemas = available_tool_schemas(tools)
+    context = context or RunContext()
 
     for _ in range(MAX_ITERATIONS):
         message = ollama_client.chat(
-            messages=conversation.messages, tools=tools, model=model
+            messages=_with_system_context(conversation.messages, context),
+            tools=schemas,
+            model=model,
+            options=options,
         )
         conversation.add_assistant(message)
 
@@ -251,7 +412,7 @@ def run(user_message: str, conversation: Conversation, model: str | None = None)
             name = fn["name"]
             args = fn.get("arguments") or {}
             try:
-                result = _execute_tool(name, args)
+                result = _execute_tool(name, args, context)
             except Exception as exc:  # feed errors back so the model can recover
                 result = f"Error executing {name}: {exc}"
             conversation.add_tool_result(name, result)

@@ -125,7 +125,13 @@ def test_list_models_merges_size_and_capabilities(monkeypatch):
         {
             "name": "qwen2.5:latest",
             "size": 100,
+            "digest": None,
             "capabilities": ["completion", "tools"],
         },
-        {"name": "nomic-embed-text:latest", "size": 50, "capabilities": ["embedding"]},
+        {
+            "name": "nomic-embed-text:latest",
+            "size": 50,
+            "digest": None,
+            "capabilities": ["embedding"],
+        },
     ]

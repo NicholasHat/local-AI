@@ -8,10 +8,11 @@ import ollama_client
 import vectorstore
 
 
-def search(query: str, n_results: int = 4) -> str:
-    """Return the most relevant document chunks as a readable string."""
+def search(query: str, n_results: int = 4, sources: list[str] | None = None) -> str:
+    """Return the most relevant document chunks as a readable string.
+    `sources` (filenames) restricts the search — None means every document."""
     embedding = ollama_client.embed(query)
-    hits = vectorstore.query(embedding, n_results=n_results)
+    hits = vectorstore.query(embedding, n_results=n_results, sources=sources)
 
     if not hits:
         return "No matching documents (nothing indexed yet, or no results)."

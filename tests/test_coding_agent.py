@@ -100,7 +100,7 @@ def repo(tmp_path, monkeypatch):
 def _script(monkeypatch, responses):
     state = {"n": 0}
 
-    def fake_chat(messages, tools=None, model=None):
+    def fake_chat(messages, tools=None, model=None, options=None):
         resp = responses[min(state["n"], len(responses) - 1)]
         state["n"] += 1
         return resp

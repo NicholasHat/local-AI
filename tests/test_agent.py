@@ -12,7 +12,7 @@ def _script(monkeypatch, responses):
     sent on each call; returns the last scripted response once exhausted."""
     state = {"n": 0, "sent": []}
 
-    def fake_chat(messages, tools=None, model=None):
+    def fake_chat(messages, tools=None, model=None, options=None):
         state["sent"].append(list(messages))
         resp = responses[min(state["n"], len(responses) - 1)]
         state["n"] += 1
@@ -93,7 +93,7 @@ def test_execute_tool_unknown_raises():
 def test_run_default_model_is_none(monkeypatch):
     captured = {}
 
-    def fake_chat(messages, tools=None, model=None):
+    def fake_chat(messages, tools=None, model=None, options=None):
         captured["model"] = model
         return {"role": "assistant", "content": "done", "tool_calls": None}
 
@@ -105,7 +105,7 @@ def test_run_default_model_is_none(monkeypatch):
 def test_run_passes_explicit_model_to_chat(monkeypatch):
     captured = {}
 
-    def fake_chat(messages, tools=None, model=None):
+    def fake_chat(messages, tools=None, model=None, options=None):
         captured["model"] = model
         return {"role": "assistant", "content": "done", "tool_calls": None}
 
@@ -120,7 +120,7 @@ def test_run_advertises_discovered_skills_as_tools(tmp_path, monkeypatch):
 
     captured = {}
 
-    def fake_chat(messages, tools=None, model=None):
+    def fake_chat(messages, tools=None, model=None, options=None):
         captured["tools"] = tools
         return {"role": "assistant", "content": "done", "tool_calls": None}
 

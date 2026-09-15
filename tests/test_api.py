@@ -30,7 +30,7 @@ _FAKE_MODELS = [
 
 
 def _mock_chat_reply(content: str):
-    return lambda messages, tools=None, model=None: {
+    return lambda messages, tools=None, model=None, options=None: {
         "role": "assistant",
         "content": content,
         "tool_calls": None,
@@ -261,7 +261,7 @@ def test_set_model_switches_current_and_used_in_chat(client, monkeypatch):
 
     captured = {}
 
-    def fake_chat(messages, tools=None, model=None):
+    def fake_chat(messages, tools=None, model=None, options=None):
         captured["model"] = model
         return {"role": "assistant", "content": "ack", "tool_calls": None}
 
@@ -454,7 +454,7 @@ def test_created_skill_is_immediately_usable_via_chat(
 
     state = {"n": 0}
 
-    def fake_chat(messages, tools=None, model=None):
+    def fake_chat(messages, tools=None, model=None, options=None):
         names = [t["function"]["name"] for t in tools]
         assert "skill__greet" in names
         state["n"] += 1

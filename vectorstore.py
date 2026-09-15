@@ -40,14 +40,25 @@ def delete_by_source(source: str) -> None:
     get_collection().delete(where={"source": source})
 
 
-def query(embedding, n_results: int = 4) -> list[dict]:
-    """Nearest chunks to `embedding`.
+def query(
+    embedding, n_results: int = 4, sources: list[str] | None = None
+) -> list[dict]:
+    """Nearest chunks to `embedding`, optionally restricted to chunks whose
+    `source` is in `sources` (how an active project scopes search to its
+    attached documents — plan.md decision 8, Phases 19–26). An empty list
+    means "no documents", which yields no hits rather than falling back to
+    everything.
 
     Chroma returns results already sorted by ASCENDING distance (nearest
     first) — lower distance = more similar. We keep that order as-is; do NOT
     invert or treat distance as a similarity score (CLAUDE.md gotcha).
     """
-    res = get_collection().query(query_embeddings=[embedding], n_results=n_results)
+    if sources is not None and not sources:
+        return []
+    where = {"source": {"$in": list(sources)}} if sources is not None else None
+    res = get_collection().query(
+        query_embeddings=[embedding], n_results=n_results, where=where
+    )
     documents = res["documents"][0]
     metadatas = res["metadatas"][0]
     distances = res["distances"][0]

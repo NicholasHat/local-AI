@@ -57,3 +57,29 @@ def get_coding_test_command() -> str:
     *when* to test, never *what* to run — this stays a fixed, configured
     command, not an arbitrary shell tool."""
     return os.getenv("CODING_TEST_COMMAND", "pytest -q")
+
+
+def web_tools_enabled() -> bool:
+    """Whether the chat agent may advertise web_search / fetch_url
+    (tools/web.py). The network is only ever used to read public pages —
+    never to run inference — and can be switched off entirely with
+    ENABLE_WEB_TOOLS=false for a fully offline posture."""
+    return os.getenv("ENABLE_WEB_TOOLS", "true").lower() not in {"0", "false", "no"}
+
+
+def get_searxng_url() -> str | None:
+    """Optional self-hosted SearXNG base URL. When set, web_search queries
+    it (JSON API) instead of scraping DuckDuckGo's HTML endpoint."""
+    return os.getenv("SEARXNG_URL") or None
+
+
+def get_vault_dir() -> Path:
+    """Where vault.py archives model manifests + blobs (an external drive, a
+    NAS...). Defaults to ~/model-vault; override via MODEL_VAULT_DIR."""
+    return Path(os.getenv("MODEL_VAULT_DIR", str(Path.home() / "model-vault")))
+
+
+def get_ollama_models_dir() -> Path:
+    """Ollama's on-disk model store (manifests/ + blobs/). Honors the same
+    OLLAMA_MODELS variable the Ollama server itself reads."""
+    return Path(os.getenv("OLLAMA_MODELS", str(Path.home() / ".ollama" / "models")))
