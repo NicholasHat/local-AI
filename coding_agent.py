@@ -30,6 +30,7 @@ from pathlib import Path
 
 import config
 import ollama_client
+import providers
 import runs
 import worktree
 
@@ -362,7 +363,16 @@ def start(repo_path: str, instruction: str, model: str | None = None) -> runs.Ru
     the API isn't blocked for the whole run — server.py's /events route
     polls runs.load() for the live step log while status == 'running'."""
     resolved_repo = _validate_repo_path(repo_path)
-    resolved_model = model or config.get_model()
+    # Explicit choice -> active provider's coding route -> env default
+    # (providers.resolve is the app-wide resolution order).
+    resolved_model = providers.resolve("coding", model)
+    if resolved_model is None:
+        raise ValueError("No model configured. Set OLLAMA_MODEL or a provider route.")
+    if not providers.supports_tools(resolved_model):
+        raise ValueError(
+            f"{resolved_model!r} can't call tools, and the coding agent works "
+            "only through tools. Route the coding role to a tool-capable model."
+        )
     base_commit = worktree.head_commit(resolved_repo)
 
     meta = runs.create(
